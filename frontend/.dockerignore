@@ -1,0 +1,5 @@
+node_modules
+dist
+*.md
+.DS_Store
+.git

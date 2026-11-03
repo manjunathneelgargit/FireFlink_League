@@ -1,0 +1,41 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: fireflink-league-backend:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/league.db}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      SESSION_HOURS: ${SESSION_HOURS:-12}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme123}
+      DISABLE_GSHEET_SYNC: ${DISABLE_GSHEET_SYNC:-0}
+    volumes:
+      - league-data:/data
+    # Optional: expose API directly (docs at :8000/api/docs). Frontend still proxies /api.
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - league
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: fireflink-league-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - league
+
+volumes:
+  league-data:
+
+networks:
+  league:
+    driver: bridge

@@ -1,0 +1,9 @@
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+league.db
+league.db-*
+tests
+*.md
+.DS_Store

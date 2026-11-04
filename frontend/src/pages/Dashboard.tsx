@@ -79,11 +79,11 @@ export default function Dashboard() {
         <OverallLeaderboard rows={s.overall} hl={hl} />
       </div>
 
-      <div className="section-label">F2F 45-demo challenge</div>
+      <div className="section-label">F2F {s.f2f.target}-demo challenge</div>
       <div className="card feature theme-dark"><F2FChallenge f2f={s.f2f} hl={hl} /></div>
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-head"><h2 style={{ color: 'var(--brand)' }}>F2F Meetings Leaderboard</h2><span className="tag-provisional">Official · live</span>
-          <span className="hint">Qualified completed F2F · Malaysia, Singapore, Middle East · scheduled pipeline</span></div>
+          <span className="hint">Qualified completed F2F · {Object.keys(s.f2f.per_region).join(', ') || 'no F2F countries set'} · scheduled pipeline</span></div>
         <F2FMeetingsLeaderboard rows={s.f2f.leaderboard} hl={hl} />
       </div>
 

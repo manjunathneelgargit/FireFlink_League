@@ -12,7 +12,7 @@ from ..models import ActivityEvent, AuditLog, BDMember, DemoRecord, RevenueRecor
 from . import league as L
 from .snapshot import ranks_signature
 
-DEMO_FIELDS = ["sl_no", "bd_id", "customer_name", "domain", "country", "demo_type", "demo_on", "demo_date",
+DEMO_FIELDS = ["sl_no", "bd_id", "customer_name", "domain", "country", "city", "demo_type", "demo_on", "demo_date",
                "demo_time", "time_zone", "status", "qualified", "poc_started_on", "poc_remarks"]
 REVENUE_FIELDS = ["sl_no", "bd_id", "customer_name", "country", "domain", "opportunity_name", "contract_status",
                   "currency", "contract_value", "contract_signed_date", "amount_credited_date",
@@ -58,7 +58,7 @@ def norm(s: str | None) -> str:
 def clean_demo(data: dict, db: Session, today: date, strict_date: bool = True) -> dict:
     errors = []
     out = {k: data.get(k) for k in DEMO_FIELDS if k in data}
-    for k in ("customer_name", "domain", "country", "demo_on", "time_zone", "poc_remarks"):
+    for k in ("customer_name", "domain", "country", "city", "demo_on", "time_zone", "poc_remarks"):
         if k in out and isinstance(out[k], str):
             out[k] = out[k].strip() or None
     if not out.get("customer_name"):
@@ -194,7 +194,7 @@ def _demo_activity(db: Session, before: dict | None, rec: DemoRecord, actor: str
                     "POC Completed": "poc_completed"}.get(rec.status, "demo_status")
             activity(db, kind, f"{name}: {tag} {before['status']} → {rec.status}", rec.bd_id, actor)
     was = before is not None and before.get("_achieved")
-    if L.is_achieved_demo(rec) and not was:
+    if L.is_achieved_demo(rec, load_config(db)) and not was:
         activity(db, "qualified_demo", f"Qualified demo recorded for {name} — {tag}", rec.bd_id, actor)
 
 
@@ -220,7 +220,7 @@ def _apply_poc_rules_cfg(rec: DemoRecord, prev_status: str | None, cfg):
     if rec.status == "Completed":
         rec.demo_completed = True
     elif rec.status in POC_STATUSES:
-        if rec.qualified == "Yes":
+        if rec.qualified == "Yes" or (prev_status == "Completed" and L.qualifies(rec, cfg)):
             rec.demo_completed = True
         if prev_status not in POC_STATUSES:
             rec.poc_started_on = rec.poc_started_on or L.now_local(cfg).date()
@@ -241,7 +241,7 @@ def update_demo(db: Session, rec: DemoRecord, data: dict, actor: str, source: st
     strict = source == "manual" and (rec.status != "Completed" or rec.demo_date is not None)
     clean = clean_demo(merged, db, L.now_local(cfg).date(), strict_date=strict)
     before = snapshot_of(rec, DEMO_FIELDS)
-    before["_achieved"] = L.is_achieved_demo(rec)
+    before["_achieved"] = L.is_achieved_demo(rec, cfg)
     before_sig = ranks_signature(db) if emit else None
     prev_status = rec.status
     for k, v in clean.items():

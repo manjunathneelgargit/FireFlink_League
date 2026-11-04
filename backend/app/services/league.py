@@ -24,6 +24,7 @@ class DemoLike(Protocol):
     bd_id: int
     customer_name: str
     country: str | None
+    city: str | None
     domain: str | None
     demo_type: str | None
     demo_date: date | None
@@ -97,16 +98,43 @@ def region_of(country: str | None, cfg: LeagueConfig) -> str | None:
     return None
 
 
+def demo_region(d, cfg: LeagueConfig) -> str | None:
+    """F2F challenge region from the demo's Country, falling back to its City."""
+    return region_of(getattr(d, "country", None), cfg) or region_of(getattr(d, "city", None), cfg)
+
+
+def demo_kind(d, cfg: LeagueConfig) -> str | None:
+    """Effective demo type. A blank Demo Type is treated as F2F when the team allows it
+    (f2f_from_location) and the Country/City is in an F2F challenge region."""
+    if d.demo_type:
+        return d.demo_type
+    if cfg is not None and cfg.f2f_from_location and demo_region(d, cfg):
+        return "F2F"
+    return None
+
+
 # --------------------------------------------------------------------------------------- demo rules
-def is_achieved_demo(d: DemoLike) -> bool:
+def qualifies(d, cfg: LeagueConfig | None) -> bool:
+    """The team's qualification rule. Teams without a Qualified Demo column count every completed
+    demo unless it is explicitly marked No."""
+    if cfg is not None and not cfg.require_qualified:
+        return d.qualified != "No"
+    return d.qualified == "Yes"
+
+
+def is_achieved_demo(d: DemoLike, cfg: LeagueConfig | None = None) -> bool:
     """Qualified completed demo. A completed+qualified demo keeps counting when it moves into POC."""
     if getattr(d, "deleted_at", None) is not None or d.demo_date is None:
         return False
-    if d.qualified != "Yes":
+    if not qualifies(d, cfg):
         return False
     if d.status == "Completed":
         return True
     return d.status in POC_STATUSES and bool(d.demo_completed)
+
+
+def is_completed_unqualified(d, cfg: LeagueConfig | None) -> bool:
+    return d.status == "Completed" and not qualifies(d, cfg)
 
 
 def in_league(d: date | None, cfg: LeagueConfig) -> bool:
@@ -114,13 +142,13 @@ def in_league(d: date | None, cfg: LeagueConfig) -> bool:
 
 
 def counts_for_league(d: DemoLike, cfg: LeagueConfig, upto: date | None = None) -> bool:
-    if not is_achieved_demo(d) or not in_league(d.demo_date, cfg):
+    if not is_achieved_demo(d, cfg) or not in_league(d.demo_date, cfg):
         return False
     return upto is None or d.demo_date <= upto
 
 
 def counts_for_f2f(d: DemoLike, cfg: LeagueConfig) -> bool:
-    return counts_for_league(d, cfg) and d.demo_type == "F2F" and region_of(d.country, cfg) is not None
+    return counts_for_league(d, cfg) and demo_kind(d, cfg) == "F2F" and demo_region(d, cfg) is not None
 
 
 def live(demos: Iterable[DemoLike]) -> list[DemoLike]:
@@ -293,9 +321,10 @@ def demo_leaderboard(cfg: LeagueConfig, bds: list[BDRef], demos: Iterable[DemoLi
             continue
         r = rows[d.bd_id]
         r["total"] += 1
-        if d.demo_type == "F2F":
+        kind = demo_kind(d, cfg)
+        if kind == "F2F":
             r["f2f"] += 1
-        elif d.demo_type == "Virtual":
+        elif kind == "Virtual":
             r["virtual"] += 1
         else:
             r["untyped"] += 1
@@ -341,16 +370,16 @@ def f2f_challenge(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLike]) ->
     completed_unqualified = 0
     f2f_outside_regions = 0
     for d in live(demos):
-        if d.demo_type != "F2F":
+        if demo_kind(d, cfg) != "F2F":
             continue
-        region = region_of(d.country, cfg)
+        region = demo_region(d, cfg)
         if counts_for_f2f(d, cfg):
             achieved += 1
             per_bd[d.bd_id] += 1
             per_region[region] += 1
         elif counts_for_league(d, cfg) and region is None:
             f2f_outside_regions += 1
-        elif d.status == "Completed" and d.qualified != "Yes" and in_league(d.demo_date, cfg) and region:
+        elif is_completed_unqualified(d, cfg) and in_league(d.demo_date, cfg) and region:
             completed_unqualified += 1
         if d.status == "Scheduled":
             sched_total += 1

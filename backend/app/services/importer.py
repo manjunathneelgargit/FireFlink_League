@@ -23,17 +23,41 @@ from . import league as L
 from . import records as R
 
 DEMO_MAP = {"Sl No": "sl_no", "BD": "bd", "Customer Name": "customer_name", "Domain": "domain",
-            "Country": "country", "Demo Type": "demo_type", "Demo On": "demo_on", "Demo Date": "demo_date",
+            "Country": "country", "City": "city", "Demo Type": "demo_type", "Demo On": "demo_on", "Demo Date": "demo_date",
             "Demo Time": "demo_time", "Time Zone": "time_zone", "Status": "status", "Qualified Demo": "qualified"}
 REV_MAP = {"Sl No": "sl_no", "BD": "bd", "Customer Name": "customer_name", "Country": "country", "Domain": "domain",
            "Opportunity Name": "opportunity_name", "Contract Status": "contract_status", "Currency": "currency",
            "Contract Value": "contract_value", "Contract Signed Date": "contract_signed_date",
            "Amount Credited Date": "amount_credited_date", "Customer Onboarding Date": "customer_onboarding_date",
            "Remarks": "remarks"}
-DEMO_COMPARE = ["sl_no", "domain", "country", "demo_type", "demo_on", "demo_date", "demo_time", "time_zone",
+DEMO_COMPARE = ["sl_no", "domain", "country", "city", "demo_type", "demo_on", "demo_date", "demo_time", "time_zone",
                 "status", "qualified"]
 REV_COMPARE = ["sl_no", "country", "domain", "contract_status", "currency", "contract_value",
                "contract_signed_date", "amount_credited_date", "customer_onboarding_date", "remarks"]
+# Demo columns that may be absent. City is an alternative to Country; Qualified Demo / Demo Type
+# become optional when the team's rules don't need them (see config.DEFAULTS).
+DEMO_READ_HEADERS = DEMO_HEADERS + ["City"]
+
+
+def demo_optional_headers(cfg, present: set[str] | None = None) -> set[str]:
+    opt = {"Time Remaining", "City", "Demo Time", "Time Zone"}
+    if not cfg.require_qualified:
+        opt.add("Qualified Demo")
+    if cfg.f2f_from_location:
+        opt.add("Demo Type")
+    if present is not None and _hkey("City") in present:
+        opt.add("Country")
+    return opt
+
+
+def demo_missing_required(sh: dict, cfg) -> list[str]:
+    opt = demo_optional_headers(cfg, {_hkey(h) for h in sh["headers"]})
+    missing = [m for m in sh["missing"] if m not in opt]
+    if "Country" in missing:
+        missing[missing.index("Country")] = "Country (or City)"
+    return missing
+
+
 KNOWN_OTHER_SHEETS = {"Post_Demos", "Stats", "Dashboard", "Different_Strategies", "Different Strategies", "League_Demo"}
 
 
@@ -133,6 +157,7 @@ def read_sheet(ws, expected: list[str], mapping: dict, ignored: list[str]) -> di
     ignored_known = [h for h in unexpected if _hkey(h) in {_hkey(x) for x in ignored}]
     unexpected = [h for h in unexpected if h not in ignored_known]
     order_ok = [h for h in present if _hkey(h) in expected_keys] == [h for h in expected if _hkey(h) in by_key]
+    fields_present = {f for h, f in mapping.items() if _hkey(h) in by_key}
     rows = []
     for r_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         rec = {}
@@ -143,7 +168,7 @@ def read_sheet(ws, expected: list[str], mapping: dict, ignored: list[str]) -> di
             continue
         rows.append((r_idx, rec))
     return {"missing": missing, "unexpected": unexpected, "ignored": ignored_known, "order_ok": order_ok,
-            "headers": present, "rows": rows}
+            "headers": present, "rows": rows, "fields_present": fields_present}
 
 
 def dropdown_values(ws, col_letter: str) -> list[str]:
@@ -195,9 +220,10 @@ def build_preview(db: Session, content: bytes, filename: str, actor: str) -> Imp
         for n in dropdown_values(ws, "B"):
             if n.lower() not in bd_by_name:
                 proposed.setdefault(n.lower(), n)
-        sh = read_sheet(ws, DEMO_HEADERS, DEMO_MAP, DEMO_IGNORED_HEADERS)
-        _sheet_header_issues(report, DEMO_SHEET, sh, ["Time Remaining"])
-        if not [m for m in sh["missing"] if m != "Time Remaining"]:
+        sh = read_sheet(ws, DEMO_READ_HEADERS, DEMO_MAP, DEMO_IGNORED_HEADERS)
+        miss = demo_missing_required(sh, cfg)
+        _sheet_header_issues(report, DEMO_SHEET, {**sh, "missing": miss, "order_ok": True}, [])
+        if not miss:
             report["demos"] = _preview_demos(db, sh["rows"], resolve_bd, today, cfg)
     if REVENUE_SHEET in sheet_names:
         ws = wb[REVENUE_SHEET]
@@ -252,9 +278,9 @@ def parse_demo_row(r_idx, raw, resolve_bd, today: date, cfg):
     d["customer_name"] = p_str(raw["customer_name"])
     if not d["customer_name"]:
         e.append("Customer Name is blank")
-    for f in ("domain", "country", "demo_on", "time_zone"):
-        d[f] = p_str(raw[f])
-    dt, recased = canon(p_str(raw["demo_type"]), DEMO_TYPES)
+    for f in ("domain", "country", "city", "demo_on", "time_zone"):
+        d[f] = p_str(raw.get(f))
+    dt, recased = canon(p_str(raw.get("demo_type")), DEMO_TYPES)
     if dt is not None and dt not in DEMO_TYPES:
         e.append(f"Invalid Demo Type '{dt}' (allowed: F2F, Virtual)")
     elif recased:
@@ -268,7 +294,7 @@ def parse_demo_row(r_idx, raw, resolve_bd, today: date, cfg):
     elif recased:
         w.append(f"Status normalised to '{st}'")
     d["status"] = st
-    q, recased = canon(p_str(raw["qualified"]), ["Yes", "No"])
+    q, recased = canon(p_str(raw.get("qualified")), ["Yes", "No"])
     if q is not None and q not in ("Yes", "No"):
         e.append(f"Invalid Qualified Demo '{q}' (allowed: Yes, No)")
     d["qualified"] = q
@@ -278,7 +304,7 @@ def parse_demo_row(r_idx, raw, resolve_bd, today: date, cfg):
         e.append(str(ex))
         d["demo_date"] = None
     try:
-        d["demo_time"] = p_time(raw["demo_time"])
+        d["demo_time"] = p_time(raw.get("demo_time"))
     except ValueError as ex:
         e.append(str(ex))
         d["demo_time"] = None
@@ -288,9 +314,9 @@ def parse_demo_row(r_idx, raw, resolve_bd, today: date, cfg):
         e.append("Completed demo has a future Demo Date")
     if st == "Completed" and not d["demo_date"]:
         w.append("Completed without Demo Date - cannot count toward any target")
-    if st == "Completed" and q is None:
+    if st == "Completed" and q is None and cfg.require_qualified:
         w.append("Completed but Qualified Demo is blank - will not count until marked Yes")
-    if dt is None:
+    if dt is None and not cfg.f2f_from_location:
         w.append("Demo Type is blank - excluded from F2F reports until set")
     if d["demo_date"] and not L.in_league(d["demo_date"], cfg):
         w.append("Demo Date is outside the league period - visible but not counted")

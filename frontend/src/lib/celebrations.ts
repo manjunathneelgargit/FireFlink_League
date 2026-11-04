@@ -1,3 +1,4 @@
+import { getTeamId } from '../api'
 /**
  * Detects genuine state TRANSITIONS between the last state this browser has seen and the new
  * snapshot. The first time a view is opened (no stored state) nothing is replayed, and refreshing
@@ -86,7 +87,7 @@ export function diff(prev: SeenState | null, s: Snapshot): Celebration[] {
 
 export function loadSeen(scope: string): SeenState | null {
   try {
-    const v = localStorage.getItem(`ffl_seen_${scope}`)
+    const v = localStorage.getItem(`ffl_seen_${scope}_${getTeamId() ?? 'default'}`)
     return v ? (JSON.parse(v) as SeenState) : null
   } catch {
     return null
@@ -95,6 +96,6 @@ export function loadSeen(scope: string): SeenState | null {
 
 export function saveSeen(scope: string, s: Snapshot) {
   try {
-    localStorage.setItem(`ffl_seen_${scope}`, JSON.stringify(stateOf(s)))
+    localStorage.setItem(`ffl_seen_${scope}_${getTeamId() ?? 'default'}`, JSON.stringify(stateOf(s)))
   } catch { /* storage unavailable: animations simply won't fire */ }
 }

@@ -16,7 +16,7 @@ export function DemoForm({ demo, onClose }: { demo?: Demo | null; onClose: () =>
   const refresh = useRefreshAll()
   const toast = useToast()
   const [f, setF] = useState(() => ({
-    bd_id: demo?.bd_id ?? '', customer_name: demo?.customer_name ?? '', domain: demo?.domain ?? '', country: demo?.country ?? '',
+    bd_id: demo?.bd_id ?? '', customer_name: demo?.customer_name ?? '', domain: demo?.domain ?? '', country: demo?.country ?? '', city: demo?.city ?? '',
     demo_type: demo?.demo_type ?? '', demo_on: demo?.demo_on ?? 'Product Demo', demo_date: demo?.demo_date ?? '',
     demo_time: demo?.demo_time ?? '', time_zone: demo?.time_zone ?? 'IST', status: demo?.status ?? 'Scheduled',
     qualified: demo?.qualified ?? '', poc_started_on: demo?.poc_started_on ?? '', poc_remarks: demo?.poc_remarks ?? '',
@@ -35,7 +35,7 @@ export function DemoForm({ demo, onClose }: { demo?: Demo | null; onClose: () =>
     const body = {
       ...f, bd_id: Number(f.bd_id), demo_type: f.demo_type || null, qualified: canQualify ? f.qualified || null : f.qualified === 'Yes' ? null : f.qualified || null,
       demo_date: f.demo_date || null, demo_time: f.demo_time || null, poc_started_on: f.poc_started_on || null,
-      domain: f.domain || null, country: f.country || null, time_zone: f.time_zone || null, poc_remarks: f.poc_remarks || null,
+      domain: f.domain || null, country: f.country || null, city: f.city || null, time_zone: f.time_zone || null, poc_remarks: f.poc_remarks || null,
     }
     try {
       if (demo) await api.put(`/api/demos/${demo.id}`, body)
@@ -66,6 +66,7 @@ export function DemoForm({ demo, onClose }: { demo?: Demo | null; onClose: () =>
         <label className="field">Customer Name <span className="req">*</span><input value={f.customer_name} onChange={(e) => set('customer_name', e.target.value)} /></label>
         <label className="field">Domain<input list="dl-domain" value={f.domain} onChange={(e) => set('domain', e.target.value)} /></label>
         <label className="field">Country<input list="dl-country" value={f.country} onChange={(e) => set('country', e.target.value)} placeholder="e.g. Malaysia, Dubai" /></label>
+        <label className="field">City<input list="dl-country" value={f.city} onChange={(e) => set('city', e.target.value)} placeholder="e.g. Kuala Lumpur" /></label>
         <label className="field">Demo Type
           <div className="seg">{['F2F', 'Virtual'].map((t) => <button type="button" key={t} className={f.demo_type === t ? 'on' : ''} onClick={() => set('demo_type', f.demo_type === t ? '' : t)}>{t}</button>)}</div></label>
         <label className="field">Demo On<input list="dl-demoon" value={f.demo_on} onChange={(e) => set('demo_on', e.target.value)} /></label>

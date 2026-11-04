@@ -4,21 +4,25 @@ import { useEffect, useState } from 'react'
 import { api, download, errorText } from '../api'
 import { DailyBars } from '../components/charts'
 import { SheetSettings, useSyncStatus } from '../components/sync'
+import { TeamsAdmin } from '../components/teams'
+import { CountryPicker } from '../components/countries'
 import { Empty, Loading, MultiSelect, StatusPill, Tabs, TypePill, useConfirm, useToast } from '../components/ui'
 import { useMeta, useRefreshAll, useSnapshot } from '../hooks'
 import { fmtDate, fmtDateTime, fmtINR, fmtLakh } from '../lib/format'
 import { setReducedMotion, useReducedMotion } from '../lib/prefs'
-import type { Demo, Revenue } from '../types'
+import type { Demo, Me, Revenue } from '../types'
 
-type Tab = 'reports' | 'import' | 'export' | 'settings' | 'bds' | 'audit'
+type Tab = 'reports' | 'import' | 'export' | 'settings' | 'bds' | 'audit' | 'teams'
 
 export default function Reports() {
   const [tab, setTab] = useState<Tab>('reports')
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/api/auth/me') })
   return (
     <>
       <div className="page-head"><div><h1>Reports & Settings</h1><div className="sub">Analytical reports, Excel import/export, league configuration and audit history</div></div></div>
       <Tabs value={tab} onChange={setTab} tabs={[
         { key: 'reports', label: 'Filtered reports' }, { key: 'import', label: 'Import workbook' }, { key: 'export', label: 'Export' },
+        ...(me.data?.is_super ? [{ key: 'teams' as Tab, label: 'Teams & logins' }] : []),
         { key: 'settings', label: 'League settings' }, { key: 'bds', label: 'BD members' }, { key: 'audit', label: 'Audit log' }]} />
       {tab === 'reports' && <FilteredReports />}
       {tab === 'import' && <ImportWizard />}
@@ -26,6 +30,7 @@ export default function Reports() {
       {tab === 'settings' && <SettingsForm />}
       {tab === 'bds' && <BDMembers />}
       {tab === 'audit' && <AuditLog />}
+      {tab === 'teams' && me.data?.is_super && <TeamsAdmin />}
     </>
   )
 }
@@ -110,7 +115,7 @@ function FilteredReports() {
           <div className="card"><div className="card-head"><h3>Matching demos</h3><span className="hint">{r.demos.length}</span></div>
             {!r.demos.length ? <Empty>No demos match.</Empty> : <div className="table-wrap" style={{ maxHeight: 420 }}><table className="data">
               <thead><tr><th>Date</th><th>BD</th><th>Customer</th><th>Domain</th><th>Country</th><th>Type</th><th>Status</th><th>Qualified</th><th>Counts</th></tr></thead>
-              <tbody>{r.demos.map((d: Demo) => <tr key={d.id}><td className="nowrap">{fmtDate(d.demo_date)}</td><td>{d.bd_name}</td><td>{d.customer_name}</td><td className="small">{d.domain}</td><td className="small">{d.country}</td>
+              <tbody>{r.demos.map((d: Demo) => <tr key={d.id}><td className="nowrap">{fmtDate(d.demo_date)}</td><td>{d.bd_name}</td><td>{d.customer_name}</td><td className="small">{d.domain}</td><td className="small">{d.country ?? d.city}</td>
                 <td><TypePill type={d.demo_type} /></td><td><StatusPill status={d.status} /></td><td>{d.qualified ?? '—'}</td><td>{d.counts ? <span className="pill green">Yes</span> : ''}</td></tr>)}</tbody></table></div>}
           </div>
           <div className="card"><div className="card-head"><h3>Matching revenue</h3><span className="hint">{r.revenue.length}</span></div>
@@ -327,12 +332,8 @@ function SettingsForm() {
           <label className="field">F2F milestones (comma separated)<input value={s.f2f_milestones.join(', ')} onChange={(e) => set('f2f_milestones', e.target.value.split(',').map((x) => Number(x.trim())).filter((x) => x > 0))} /></label>
           <label className="field">Revenue award threshold (₹)<input type="number" min={0} value={s.revenue_threshold_inr} onChange={(e) => set('revenue_threshold_inr', Number(e.target.value))} /></label>
         </div>
-        <div className="section-label" style={{ marginTop: 16 }}>Region matching (Country field → F2F region)</div>
-        <div className="form-grid">
-          {Object.entries(s.f2f_regions as Record<string, string[]>).map(([r, aliases]) => (
-            <label key={r} className="field">{r}<textarea rows={4} value={aliases.join(', ')} onChange={(e) => set('f2f_regions', { ...s.f2f_regions, [r]: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></label>))}
-        </div>
-        <div className="tiny dim" style={{ marginTop: 6 }}>A demo's Country matches a region if the whole value or any comma-separated part equals one of these (case-insensitive), e.g. “Singapore, USA” → Singapore.</div>
+        <div className="section-label" style={{ marginTop: 16 }}>F2F countries — where this team's F2F demos count</div>
+        <CountryPicker value={s.f2f_regions} onChange={(v) => set('f2f_regions', v)} />
       </div>
       <div className="card">
         <div className="card-head"><h3>Prizes</h3></div>
@@ -423,7 +424,7 @@ function AuditLog() {
   return (
     <div className="col" style={{ gap: 12 }}>
       <div className="row"><select style={{ width: 220 }} value={entity} onChange={(e) => setEntity(e.target.value)}>
-        <option value="">All entities</option>{['demo', 'revenue', 'import', 'settings', 'bd', 'exchange_rate', 'award', 'day', 'export', 'auth'].map((x) => <option key={x}>{x}</option>)}</select>
+        <option value="">All entities</option>{['demo', 'revenue', 'import', 'settings', 'bd', 'exchange_rate', 'award', 'day', 'export', 'auth', 'team', 'user'].map((x) => <option key={x}>{x}</option>)}</select>
         <span className="small muted">Who changed what, and when. Most recent first.</span></div>
       {!q.data ? <Loading /> : !q.data.length ? <Empty>No audit entries.</Empty> : (
         <div className="table-wrap" style={{ maxHeight: 640 }}><table className="data">

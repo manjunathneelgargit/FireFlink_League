@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Lock } from 'lucide-react'
+import { Eye, EyeOff, Lock } from 'lucide-react'
 import { useState } from 'react'
 import { api, errorText } from '../api'
 
@@ -7,6 +7,7 @@ export default function Login() {
   const qc = useQueryClient()
   const [u, setU] = useState('')
   const [p, setP] = useState('')
+  const [showPw, setShowPw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const submit = async (e: React.FormEvent) => {
@@ -33,7 +34,14 @@ export default function Login() {
         <h1 style={{ fontSize: 26, letterSpacing: '-0.02em' }}>Sign in to the league console</h1>
         <div className="muted small">League administrator sign-in. BDs don't need an account — this console is admin-only.</div>
         <label className="field">Username<input autoFocus autoComplete="username" value={u} onChange={(e) => setU(e.target.value)} required /></label>
-        <label className="field">Password<input type="password" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} required /></label>
+        <label className="field">Password
+          <div className="pw-wrap">
+            <input type={showPw ? 'text' : 'password'} autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} required />
+            <button type="button" className="pw-toggle" aria-label={showPw ? 'Hide password' : 'Show password'} onClick={() => setShowPw((v) => !v)}>
+              {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </label>
         {err && <div className="errors">{err}</div>}
         <button className="btn primary" disabled={busy}><Lock size={15} /> {busy ? 'Signing in…' : 'Sign in'}</button>
       </form>

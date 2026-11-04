@@ -8,8 +8,26 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown, isForm = false): Promise<T> {
-  const headers: Record<string, string> = { 'X-Requested-With': 'ffl' }
+/* ---- team selection (super admin switcher). Team admins are locked to their team by the server. ---- */
+const TEAM_KEY = 'ffl_team'
+
+export function getTeamId(): string | null {
+  try { return localStorage.getItem(TEAM_KEY) } catch { return null }
+}
+
+export function setTeamId(id: number | null) {
+  try { if (id == null) localStorage.removeItem(TEAM_KEY); else localStorage.setItem(TEAM_KEY, String(id)) } catch { /* storage unavailable */ }
+}
+
+function baseHeaders(team?: number): Record<string, string> {
+  const h: Record<string, string> = { 'X-Requested-With': 'ffl' }
+  const t = team != null ? String(team) : getTeamId()
+  if (t) h['X-Team-Id'] = t
+  return h
+}
+
+async function request<T>(method: string, url: string, body?: unknown, isForm = false, team?: number): Promise<T> {
+  const headers: Record<string, string> = baseHeaders(team)
   if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   const res = await fetch(url, {
     method,
@@ -39,11 +57,19 @@ export const api = {
   upload: <T,>(url: string, form: FormData) => request<T>('POST', url, form, true),
 }
 
+/** Same as `api`, but for one specific team regardless of the team being viewed (super admin set-up). */
+export const teamApi = (team: number) => ({
+  get: <T,>(url: string) => request<T>('GET', url, undefined, false, team),
+  post: <T,>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}, false, team),
+  put: <T,>(url: string, body: unknown) => request<T>('PUT', url, body, false, team),
+  del: <T,>(url: string) => request<T>('DELETE', url, undefined, false, team),
+})
+
 /** Download an xlsx from GET or POST endpoints. */
 export async function download(url: string, body?: unknown) {
   const res = await fetch(url, {
     method: body ? 'POST' : 'GET',
-    headers: { 'X-Requested-With': 'ffl', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { ...baseHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   })

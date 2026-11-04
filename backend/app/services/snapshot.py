@@ -58,9 +58,9 @@ def build(db: Session, now: datetime | None = None, cfg: LeagueConfig | None = N
         "qualified_f2f": sum(r["f2f"] for r in overall),
         "qualified_virtual": sum(r["virtual"] for r in overall),
         "scheduled": sum(1 for d in demos if d.status == "Scheduled"),
-        "scheduled_f2f": sum(1 for d in demos if d.status == "Scheduled" and d.demo_type == "F2F"),
-        "scheduled_virtual": sum(1 for d in demos if d.status == "Scheduled" and d.demo_type == "Virtual"),
-        "completed_unqualified": sum(1 for d in league_live if d.status == "Completed" and d.qualified != "Yes"),
+        "scheduled_f2f": sum(1 for d in demos if d.status == "Scheduled" and L.demo_kind(d, cfg) == "F2F"),
+        "scheduled_virtual": sum(1 for d in demos if d.status == "Scheduled" and L.demo_kind(d, cfg) == "Virtual"),
+        "completed_unqualified": sum(1 for d in league_live if L.is_completed_unqualified(d, cfg)),
         "targets_assigned": assigned,
         "targets_achieved": achieved,
         "targets_missed": sum(v["targets_missed"] for v in per_bd.values()),
@@ -89,6 +89,8 @@ def build(db: Session, now: datetime | None = None, cfg: LeagueConfig | None = N
         "standup": cfg.raw.get("standup_time"),
         "motivational_messages": cfg.raw.get("motivational_messages", []),
         "arena_refresh_seconds": cfg.raw.get("arena_refresh_seconds", 30),
+        "require_qualified": cfg.require_qualified,
+        "f2f_from_location": cfg.f2f_from_location,
     }
     rev_public = {k: v for k, v in revenue.items() if k != "evaluated"}
     return {"league": league, "kpis": kpis, "daily": daily, "overall": overall, "f2f": f2f,

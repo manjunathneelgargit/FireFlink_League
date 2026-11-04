@@ -56,7 +56,7 @@ function DemoTable() {
   const live = !!meta?.live_mode
 
   const rows = useMemo(() => (data ?? []).filter((d) => {
-    if (q && !`${d.customer_name} ${d.country ?? ''} ${d.domain ?? ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    if (q && !`${d.customer_name} ${d.country ?? ''} ${d.city ?? ''} ${d.domain ?? ''}`.toLowerCase().includes(q.toLowerCase())) return false
     if (bds.length && !bds.includes(String(d.bd_id))) return false
     if (sts.length && !sts.includes(d.status)) return false
     if (types.length && !types.includes(d.demo_type ?? '(blank)')) return false
@@ -87,7 +87,7 @@ function DemoTable() {
       <div className="row wrap">
         <div style={{ position: 'relative', flex: '1 1 220px', maxWidth: 320 }}>
           <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--dim)' }} />
-          <input placeholder="Search customer, country, domain" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 32 }} />
+          <input placeholder="Search customer, country, city, domain" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
         <div style={{ width: 170 }}><MultiSelect placeholder="All BDs" value={bds} onChange={setBds} options={(meta?.bds ?? []).map((b) => ({ value: String(b.id), label: b.name }))} /></div>
         <div style={{ width: 170 }}><MultiSelect placeholder="All statuses" value={sts} onChange={setSts} options={(meta?.demo_statuses ?? []).map((s) => ({ value: s, label: s }))} /></div>
@@ -104,7 +104,7 @@ function DemoTable() {
         <div className="table-wrap">
           <table className="data">
             <thead><tr>
-              <th>Sl</th><th>BD</th><th>Customer</th><th>Domain</th><th>Country</th><th>Demo Type</th><th>Demo On</th><th>Date</th><th>Time</th>
+              <th>Sl</th><th>BD</th><th>Customer</th><th>Domain</th><th>Country / City</th><th>Demo Type</th><th>Demo On</th><th>Date</th><th>Time</th>
               <th>TZ</th><th>Time remaining</th><th>Status</th><th>Qualified</th><th>League</th><th></th>
             </tr></thead>
             <tbody>
@@ -114,11 +114,12 @@ function DemoTable() {
                   <td className="nowrap" style={{ fontWeight: 600 }}>{d.bd_name}</td>
                   <td style={{ fontWeight: 600 }}>{d.customer_name}</td>
                   <td className="small">{d.domain ?? <span className="dim">—</span>}</td>
-                  <td className="small">{d.country ?? <span className="dim">—</span>}{d.region && <div className="tiny gold">{d.region}</div>}</td>
+                  <td className="small">{d.country || d.city ? [d.country, d.city].filter(Boolean).join(' · ') : <span className="dim">—</span>}{d.region && <div className="tiny gold">{d.region}</div>}</td>
                   <td>
                     <select value={d.demo_type ?? ''} disabled={live} onChange={(e) => patch(d, { demo_type: (e.target.value || null) as any })} style={{ minHeight: 30, padding: '3px 6px', width: 92 }} aria-label="Demo Type">
                       <option value="">—</option><option>F2F</option><option>Virtual</option>
                     </select>
+                    {!d.demo_type && d.effective_type && <div className="tiny gold" title="Demo Type is blank; F2F worked out from Country / City">F2F (by location)</div>}
                   </td>
                   <td className="small">{d.demo_on}</td>
                   <td className="nowrap">{fmtDate(d.demo_date)}</td>
@@ -139,7 +140,7 @@ function DemoTable() {
                   <td>{d.counts ? <span className="pill green" title="Counts toward official league totals"><CheckCircle2 size={12} /> Counts</span>
                     : d.status === 'Completed' && !d.qualified ? <span className="pill amber">Qualify?</span>
                       : d.demo_date && !d.in_league ? <span className="pill grey">Pre-league</span> : null}
-                    {d.counts_f2f && <span className="pill gold" style={{ marginLeft: 4 }}>F2F 45</span>}</td>
+                    {d.counts_f2f && <span className="pill gold" style={{ marginLeft: 4 }} title="Counts toward the F2F challenge">F2F challenge</span>}</td>
                   <td className="nowrap">
                     {!live && d.status === 'Scheduled' && d.demo_date && d.demo_at && new Date(d.demo_at).getTime() < now &&
                       <button className="btn sm" title="Mark Completed + Qualified" onClick={() => markQualified(d)}><CheckCircle2 size={14} /></button>}

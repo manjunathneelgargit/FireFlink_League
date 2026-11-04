@@ -46,7 +46,9 @@ def _date_fmt(ws, col_idx: int, fmt="yyyy-mm-dd"):
 
 def write_demo_sheet(wb: Workbook, demos: list, bd_names: list[str], title: str = DEMO_SHEET):
     ws = wb.create_sheet(title)
-    _header(ws, DEMO_HEADERS)
+    # City is appended as the last column (only when used) so the workbook layout stays unchanged.
+    with_city = any(getattr(d, "city", None) for d in demos)
+    _header(ws, DEMO_HEADERS + (["City"] if with_city else []))
     for i, d in enumerate(demos, start=2):
         ws.append([
             d.sl_no, d.bd.name, d.customer_name, d.domain, d.country, d.demo_type, d.demo_on, d.demo_date,
@@ -55,7 +57,7 @@ def write_demo_sheet(wb: Workbook, demos: list, bd_names: list[str], title: str 
             f'=IF(H{i}="","",IF(H{i}+I{i}<=NOW(),"0 Hrs 0 Min",INT((H{i}+I{i}-NOW())*24) & " Hrs " & '
             f'MOD(INT((H{i}+I{i}-NOW())*1440),60) & " Min"))',
             d.status, d.qualified,
-        ])
+        ] + ([d.city] if with_city else []))
     _date_fmt(ws, 8)
     _date_fmt(ws, 9, "hh:mm")
     n = len(demos)

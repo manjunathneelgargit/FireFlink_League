@@ -104,7 +104,8 @@ export interface SyncInfo {
 
 export interface Demo {
   id: string; sl_no: number | null; bd_id: number; bd_name: string; customer_name: string; domain: string | null
-  country: string | null; demo_type: 'F2F' | 'Virtual' | null; demo_on: string | null; demo_date: string | null
+  country: string | null; city: string | null; demo_type: 'F2F' | 'Virtual' | null; effective_type: 'F2F' | 'Virtual' | null
+  demo_on: string | null; demo_date: string | null
   demo_time: string | null; time_zone: string | null; time_remaining: string; time_remaining_seconds: number | null
   demo_at: string | null; status: string; qualified: 'Yes' | 'No' | null; counts: boolean; counts_f2f: boolean
   achieved: boolean; in_league: boolean; region: string | null; poc_started_on: string | null
@@ -132,3 +133,6 @@ export interface Meta {
   currencies: string[]; domains: string[]; countries: string[]; regions: string[]; timezone: string
   live_mode: boolean; sheet_url: string | null
 }
+
+export interface Team { id: number; name: string; slug: string; active: boolean }
+export interface Me { username: string; role: 'super_admin' | 'team_admin'; is_super: boolean; team: Team; teams: Team[] }

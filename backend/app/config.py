@@ -56,6 +56,22 @@ DEFAULTS: dict = {
     "gsheet_sync_enabled": False,
     "gsheet_sync_interval_seconds": 60,
     "arena_token_hash": None,
+    # Sheet-format rules (per team). APAC's sheet has Qualified Demo + Demo Type + Country columns;
+    # other teams may track a simpler sheet.
+    #  - count_requires_qualified: True  -> a demo counts only when Completed AND Qualified Demo = Yes.
+    #                              False -> every Completed demo counts unless Qualified Demo = No.
+    #  - f2f_from_location: True -> when Demo Type is blank, a demo whose Country/City maps to an
+    #                       F2F challenge region is treated as F2F.
+    "count_requires_qualified": True,
+    "f2f_from_location": False,
+}
+
+# Overrides applied when a NEW team is created (on top of DEFAULTS). Existing teams keep their values.
+NEW_TEAM_DEFAULTS: dict = {
+    "gsheet_url": "",
+    "gsheet_sync_enabled": False,
+    "count_requires_qualified": False,
+    "f2f_from_location": True,
 }
 
 
@@ -73,6 +89,8 @@ class LeagueConfig:
     f2f_milestones: list[int]
     revenue_threshold_inr: float
     f2f_regions: dict[str, list[str]]
+    require_qualified: bool = True
+    f2f_from_location: bool = False
     raw: dict = field(default_factory=dict)
 
 
@@ -102,6 +120,8 @@ def to_config(raw: dict) -> LeagueConfig:
         f2f_milestones=[int(x) for x in raw["f2f_milestones"]],
         revenue_threshold_inr=float(raw["revenue_threshold_inr"]),
         f2f_regions={k: [a.lower().strip() for a in v] for k, v in raw["f2f_regions"].items()},
+        require_qualified=bool(raw.get("count_requires_qualified", True)),
+        f2f_from_location=bool(raw.get("f2f_from_location", False)),
         raw=raw,
     )
 
@@ -111,15 +131,17 @@ def load_config(db: Session) -> LeagueConfig:
 
 
 EDITABLE_KEYS = {
-    "league_name", "league_start", "league_end", "office_login_time", "standup_time", "day_cutoff_time",
+    "league_name", "league_start", "league_end", "daily_target", "office_login_time", "standup_time", "day_cutoff_time",
     "week_start_day", "f2f_target", "f2f_milestones", "revenue_threshold_inr", "f2f_regions", "f2f_windows",
     "awards", "motivational_messages", "arena_refresh_seconds", "timezone",
     "gsheet_url", "gsheet_sync_enabled", "gsheet_sync_interval_seconds",
+    "count_requires_qualified", "f2f_from_location",
 }
 
 
 def save_setting(db: Session, key: str, value) -> None:
-    row = db.get(Setting, key)
+    """Saves a setting for the session's team (the team filter applies to this query)."""
+    row = db.query(Setting).filter(Setting.key == key).first()
     if row is None:
         db.add(Setting(key=key, value=value))
     else:

@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MotionConfig } from 'framer-motion'
-import { Award, BarChart3, CalendarRange, IndianRupee, LayoutDashboard, LogOut, MonitorPlay, Users, Zap, ZapOff } from 'lucide-react'
+import { Award, BarChart3, CalendarRange, IndianRupee, LayoutDashboard, LogOut, MonitorPlay, Users, UsersRound, Zap, ZapOff } from 'lucide-react'
 import { useEffect } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { api } from './api'
+import { api, getTeamId, setTeamId } from './api'
 import { ConfirmProvider, Loading, ToastProvider } from './components/ui'
 import { setReducedMotion, useReducedMotion } from './lib/prefs'
 import Arena from './pages/Arena'
@@ -14,16 +14,31 @@ import DemoTracker from './pages/DemoTracker'
 import Login from './pages/Login'
 import Reports from './pages/Reports'
 import RevenueTracker from './pages/RevenueTracker'
+import type { Me } from './types'
 
-function Brand() {
+function Brand({ team }: { team?: string }) {
   return (
     <NavLink to="/" className="brand" aria-label="FireFlink League home">
       <img src="/fireflink-logo.svg" className="brand-mark" alt="" />
       <div>
         <div className="brand-word">FIREFLINK</div>
-        <div className="brand-sub">4.0 League</div>
+        <div className="brand-sub">4.0 League{team ? ` · ${team}` : ''}</div>
       </div>
     </NavLink>
+  )
+}
+
+/** Super admin: pick the team every screen shows. Team admins see their (fixed) team name. */
+function TeamSwitcher({ me }: { me: Me }) {
+  const qc = useQueryClient()
+  if (!me.is_super) return <span className="pill grey team-pill" title="Your team"><UsersRound size={13} /> {me.team.name}</span>
+  return (
+    <label className="team-switch" title="Switch team">
+      <UsersRound size={15} />
+      <select aria-label="Team" value={me.team.id} onChange={(e) => { setTeamId(Number(e.target.value)); qc.resetQueries() }}>
+        {me.teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.active ? '' : ' (inactive)'}</option>)}
+      </select>
+    </label>
   )
 }
 
@@ -36,7 +51,8 @@ const NAV = [
   { to: '/reports', label: 'Reports & Settings', icon: BarChart3 },
 ]
 
-function Shell({ user }: { user: string }) {
+function Shell({ me }: { me: Me }) {
+  const user = me.username
   const qc = useQueryClient()
   const { active, setting } = useReducedMotion()
   const logout = async () => {
@@ -48,7 +64,7 @@ function Shell({ user }: { user: string }) {
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
-          <Brand />
+          <Brand team={me.team.name} />
           <nav className="nav" aria-label="Main">
             {NAV.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} title={n.label}>
@@ -57,12 +73,13 @@ function Shell({ user }: { user: string }) {
             ))}
           </nav>
           <div className="topbar-actions">
+            <TeamSwitcher me={me} />
             <button className="btn ghost icon sm" title={active ? 'Reduced motion is on — click for full animations' : 'Animations on — click for reduced motion'}
               aria-label="Toggle reduced motion" onClick={() => setReducedMotion(active ? 'off' : 'on')}>
               {active ? <ZapOff size={16} /> : <Zap size={16} />}
             </button>
             <a className="btn sm" href="/arena" target="_blank" rel="noreferrer" title="Open League Arena (office display)">
-              <MonitorPlay size={15} /> <span className="hide-sm">League Arena</span>
+              <MonitorPlay size={15} /> <span className="hide-sm hide-md">League Arena</span>
             </a>
             <button className="btn sm primary" onClick={logout} title={`Signed in as ${user}${setting === 'system' ? ' · motion follows system setting' : ''} — sign out`}><LogOut size={14} /> <span className="hide-sm">Sign out</span></button>
           </div>
@@ -88,7 +105,12 @@ export default function App() {
   const loc = useLocation()
   const { active } = useReducedMotion()
   const isArena = loc.pathname.startsWith('/arena')
-  const me = useQuery({ queryKey: ['me'], queryFn: () => api.get<{ username: string }>('/api/auth/me'), retry: false, enabled: !isArena })
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/api/auth/me'), retry: false, enabled: !isArena })
+
+  // Keep the stored team in step with the team the server actually resolved.
+  useEffect(() => {
+    if (me.data && getTeamId() !== String(me.data.team.id)) setTeamId(me.data.team.id)
+  }, [me.data])
 
   useEffect(() => {
     const h = () => { if (!location.pathname.startsWith('/login') && !location.pathname.startsWith('/arena')) location.href = '/login' }
@@ -101,7 +123,7 @@ export default function App() {
   else if (loc.pathname === '/login') body = me.data ? <Navigate to="/" replace /> : <Login />
   else if (me.isLoading) body = <Loading />
   else if (!me.data) body = <Navigate to="/login" replace />
-  else body = <Shell user={me.data.username} />
+  else body = <Shell me={me.data} />
 
   return (
     <MotionConfig reducedMotion={active ? 'always' : 'never'}>

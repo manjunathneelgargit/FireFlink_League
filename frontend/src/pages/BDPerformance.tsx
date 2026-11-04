@@ -37,7 +37,7 @@ export function BDIndex() {
 }
 
 interface BDResp {
-  bd: { id: number; name: string }; standing: OverallRow | null; daily: DailyBD | null
+  bd: { id: number; name: string }; league: { f2f_target: number }; standing: OverallRow | null; daily: DailyBD | null
   revenue: { total_inr: number; award_eligible: boolean; gap_to_threshold: number; gap_to_leader: number; rank: number } | null
   weekly: { label: string; start: string; end: string; state: string; total: number; rank: number | null }[]
   f2f_challenge: { f2f: number; scheduled_f2f: number; rank: number } | null
@@ -85,7 +85,7 @@ export default function BDPerformance() {
       <div className="kpis">
         <KpiCard label="Qualified completed" value={st?.total ?? 0} accent="var(--gold)" />
         <KpiCard label="Qualified Virtual" value={st?.virtual ?? 0} accent="var(--blue)" />
-        <KpiCard label="Qualified F2F" value={st?.f2f ?? 0} accent="var(--fire)" foot={q.data.f2f_challenge ? `${q.data.f2f_challenge.f2f} toward the 45 · ${q.data.f2f_challenge.scheduled_f2f} scheduled` : undefined} />
+        <KpiCard label="Qualified F2F" value={st?.f2f ?? 0} accent="var(--fire)" foot={q.data.f2f_challenge ? `${q.data.f2f_challenge.f2f} toward the ${q.data.league.f2f_target} · ${q.data.f2f_challenge.scheduled_f2f} scheduled` : undefined} />
         <KpiCard label="Scheduled demos" value={q.data.counts.scheduled} accent="var(--blue)" foot={`${q.data.counts.completed_unqualified} completed but not qualified`} />
         <KpiCard label="Target achievement" value={d?.achievement_rate ?? 0} accent="var(--green)" format={(v) => (d?.achievement_rate == null ? '—' : `${v.toFixed(0)}%`)}
           foot={`${d?.targets_achieved ?? 0} achieved · ${d?.targets_missed ?? 0} missed · ${d?.targets_assigned ?? 0} working days`} />
@@ -142,7 +142,7 @@ export default function BDPerformance() {
         <div className="table-wrap" style={{ maxHeight: 420 }}><table className="data">
           <thead><tr><th>Date</th><th>Customer</th><th>Country</th><th>Type</th><th>Status</th><th>Qualified</th><th>Counts</th></tr></thead>
           <tbody>{q.data.demos.map((x) => (
-            <tr key={x.id}><td className="nowrap">{fmtDate(x.demo_date)}</td><td>{x.customer_name}</td><td className="small">{x.country}</td><td><TypePill type={x.demo_type} /></td>
+            <tr key={x.id}><td className="nowrap">{fmtDate(x.demo_date)}</td><td>{x.customer_name}</td><td className="small">{x.country ?? x.city}</td><td><TypePill type={x.effective_type ?? x.demo_type} /></td>
               <td><StatusPill status={x.status} /></td><td>{x.qualified ?? '—'}</td><td>{x.counts ? <span className="pill green">Yes</span> : ''}</td></tr>))}</tbody>
         </table></div>
       </div>

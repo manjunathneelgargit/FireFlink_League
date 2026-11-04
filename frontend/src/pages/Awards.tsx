@@ -34,7 +34,7 @@ export default function Awards() {
       )}
       {tab === 'f2f' && (
         <div className="card">
-          <div className="card-head"><h2>F2F Champion</h2><StateTag state={s.awards.f2f.state} /><span className="hint">Qualified completed F2F demos · Malaysia, Singapore, Middle East</span><span className="spacer" />
+          <div className="card-head"><h2>F2F Champion</h2><StateTag state={s.awards.f2f.state} /><span className="hint">Qualified completed F2F demos · {Object.keys(s.f2f.per_region).join(', ') || 'no F2F countries set'}</span><span className="spacer" />
             <FinalizeButton s={s} awardKey="f2f" periodKey="league" state={s.awards.f2f.state} finalizedId={s.awards.f2f.finalized?.id} /></div>
           {s.awards.f2f.tie && <div className="notice amber" style={{ marginBottom: 10 }}>{s.awards.f2f.tie_note}</div>}
           <div className="table-wrap"><table className="data">

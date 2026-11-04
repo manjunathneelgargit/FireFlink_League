@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 from app.auth import hash_password
 from app.constants import DEMO_HEADERS, REVENUE_HEADERS
-from app.db import SessionLocal
+from app.db import SessionLocal  # noqa: F401
+from app.tenancy import team_session
 from app.main import app
 from app.models import AdminUser, AuditLog
 
@@ -18,8 +19,8 @@ H = {"X-Requested-With": "ffl"}
 
 @pytest.fixture()
 def client(fresh_db):
-    with SessionLocal() as db:
-        db.add(AdminUser(username="admin", password_hash=hash_password("correct-horse-1")))
+    with team_session() as db:
+        db.add(AdminUser(username="admin", password_hash=hash_password("correct-horse-1"), role="super_admin"))
         db.commit()
     c = TestClient(app)
     r = c.post("/api/auth/login", json={"username": "admin", "password": "correct-horse-1"})
@@ -235,5 +236,5 @@ def test_settings_validation_and_audit(client):
     assert client.put("/api/settings", json={"day_cutoff_time": "19:30"}, headers=H).status_code == 200
     assert client.put("/api/settings", json={"league_end": "2026-10-01"}, headers=H).status_code == 422
     assert client.put("/api/settings", json={"hack": 1}, headers=H).status_code == 422
-    with SessionLocal() as db:
+    with team_session() as db:
         assert db.query(AuditLog).filter_by(entity="settings").count() == 1

@@ -1,6 +1,6 @@
 import { animate, motion, AnimatePresence } from 'framer-motion'
-import { X } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Eye, EyeOff, X } from 'lucide-react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { bdHue, initials } from '../lib/format'
 import { reducedMotionActive } from '../lib/prefs'
 
@@ -149,6 +149,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setItems((x) => [...x.slice(-4), { ...t, id }])
     setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), t.tone === 'red' ? 7000 : 5200)
   }, [])
+  const dismiss = (id: number) => setItems((x) => x.filter((i) => i.id !== id))
   return (
     <ToastCtx.Provider value={push}>
       {children}
@@ -158,10 +159,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <motion.div key={t.id} className={`toast ${t.tone}`} initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 60 }} transition={{ type: 'spring', stiffness: 380, damping: 30 }}>
               {t.icon}
-              <div>
+              <div className="toast-body">
                 <div className="tt">{t.title}</div>
                 {t.body && <div className="small muted">{t.body}</div>}
               </div>
+              <button type="button" className="toast-x" aria-label="Close notification" title="Close" onClick={() => dismiss(t.id)}><X size={16} /></button>
             </motion.div>
           ))}
         </AnimatePresence>
@@ -220,6 +222,20 @@ export function MultiSelect({ options, value, onChange, placeholder }: {
           {value.length > 0 && <button className="btn sm ghost" onClick={() => onChange([])}>Clear</button>}
         </div>
       )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ password with show/hide */
+export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const [show, setShow] = useState(false)
+  const { type: _t, ...rest } = props
+  return (
+    <div className="pw-wrap">
+      <input {...rest} type={show ? 'text' : 'password'} />
+      <button type="button" className="pw-toggle" aria-label={show ? 'Hide password' : 'Show password'} onClick={() => setShow((v) => !v)}>
+        {show ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
     </div>
   )
 }

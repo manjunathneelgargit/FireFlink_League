@@ -89,6 +89,21 @@ export function SheetSettings({ s, set }: { s: any; set: (k: string, v: any) => 
             <button type="button" className={!s.gsheet_sync_enabled ? 'on' : ''} onClick={() => set('gsheet_sync_enabled', false)}>Off</button></div></label>
         <label className="field">Check every (seconds, min 30)<input type="number" min={30} value={s.gsheet_sync_interval_seconds} onChange={(e) => set('gsheet_sync_interval_seconds', Number(e.target.value))} /></label>
       </div>
+      <div className="section-label" style={{ marginTop: 16 }}>Sheet format rules (this team)</div>
+      <div className="form-grid">
+        <label className="field">Which completed demos count
+          <div className="seg"><button type="button" className={s.count_requires_qualified ? 'on' : ''} onClick={() => set('count_requires_qualified', true)}>Only Qualified = Yes</button>
+            <button type="button" className={!s.count_requires_qualified ? 'on' : ''} onClick={() => set('count_requires_qualified', false)}>Every Completed demo</button></div></label>
+        <label className="field">F2F when Demo Type is blank
+          <div className="seg"><button type="button" className={s.f2f_from_location ? 'on' : ''} onClick={() => set('f2f_from_location', true)}>From Country / City</button>
+            <button type="button" className={!s.f2f_from_location ? 'on' : ''} onClick={() => set('f2f_from_location', false)}>Not counted as F2F</button></div></label>
+      </div>
+      <div className="tiny dim" style={{ marginTop: 6 }}>
+        Required columns: Sl No, BD, Customer Name, Domain, Country <i>or</i> City, Demo On, Demo Date, Status
+        {s.count_requires_qualified ? ', Qualified Demo' : ''}{s.f2f_from_location ? '' : ', Demo Type'}. Demo Time and Time Zone are optional.
+        “Every Completed demo” still excludes a demo explicitly marked Qualified = No. “From Country / City” treats a demo located in one of this team's F2F countries as F2F.
+        A column that is missing from the sheet never overwrites what the app already holds.
+      </div>
       {data && (
         <div className="col" style={{ gap: 8, marginTop: 14 }}>
           <div className="small">Last successful sync: <b>{data.last_success ? new Date(data.last_success).toLocaleString() : '—'}</b>

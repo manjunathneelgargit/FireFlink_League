@@ -1,16 +1,18 @@
 """Admin CLI.
 
-  python manage.py create-admin <username>          (prompts for password)
-  python manage.py import-workbook <file.xlsx>      (preview + apply all new rows, add BDs from workbook)
+  python manage.py create-admin <username>                    (super admin; prompts for password)
+  python manage.py import-workbook <file.xlsx> [team-slug]    (preview + apply all new rows, add BDs from
+                                                               workbook; default team: the first team)
 """
 import getpass
 import sys
 from pathlib import Path
 
-from app import models  # noqa: F401
+from app import models, tenancy  # noqa: F401
 from app.auth import hash_password
-from app.db import Base, SessionLocal, engine
-from app.models import AdminUser
+from app.db import SessionLocal, engine
+from app.migrate import ensure_schema
+from app.models import ROLE_SUPER, AdminUser, Team
 from app.services import importer as I
 
 
@@ -24,14 +26,20 @@ def create_admin(username: str):
             u.password_hash = hash_password(pw)
             print(f"Password reset for {username}")
         else:
-            db.add(AdminUser(username=username, password_hash=hash_password(pw)))
-            print(f"Admin {username} created")
+            db.add(AdminUser(username=username, password_hash=hash_password(pw), role=ROLE_SUPER))
+            print(f"Super admin {username} created")
         db.commit()
 
 
-def import_workbook(path: str):
+def import_workbook(path: str, team_slug: str | None = None):
     content = Path(path).read_bytes()
     with SessionLocal() as db:
+        q = db.query(Team)
+        team = q.filter(Team.slug == team_slug).first() if team_slug else q.order_by(Team.id).first()
+        if team is None:
+            sys.exit(f"Team '{team_slug}' not found")
+        tenancy.bind_team(db, team.id)
+        print(f"Importing into team: {team.name}")
         hist = I.build_preview(db, content, Path(path).name, "cli")
         p = hist.preview
         for issue in p["sheet_issues"]:
@@ -48,8 +56,8 @@ def import_workbook(path: str):
 
 
 if __name__ == "__main__":
-    Base.metadata.create_all(engine)
+    ensure_schema(engine)
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    cmd, arg = sys.argv[1], sys.argv[2]
-    {"create-admin": create_admin, "import-workbook": import_workbook}.get(cmd, lambda _: sys.exit(__doc__))(arg)
+    cmd, args = sys.argv[1], sys.argv[2:]
+    {"create-admin": create_admin, "import-workbook": import_workbook}.get(cmd, lambda *_: sys.exit(__doc__))(*args)

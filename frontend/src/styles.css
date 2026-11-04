@@ -141,12 +141,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -0.01em; }
 .nav a.active { background: var(--surface3); color: var(--brand); font-weight: 600; }
 .nav a.active svg { color: var(--brand); }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.team-switch { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--brand); }
+.team-switch select { border: 0; background: transparent; min-height: 34px; padding: 0 6px; font-weight: 600; color: var(--text); width: auto; max-width: 128px; text-overflow: ellipsis; }
+.team-switch select:focus { outline: none; }
+.team-switch:focus-within { box-shadow: 0 0 0 3px var(--focus, rgba(124, 58, 237, 0.2)); }
+.team-pill { font-size: 12px; padding: 5px 10px; }
+/* The top bar has a fixed max width, so these apply at every screen size (team switcher needs the room). */
+.topbar-actions .hide-md { display: none; }
+.nav a { padding: 8px 8px; gap: 5px; font-size: 13.5px; }
 .main { max-width: 1400px; margin: 0 auto; padding: 22px 20px 70px; min-width: 0; }
 .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .page-head h1 { font-size: 34px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
 .page-head .sub { color: var(--muted); margin-top: 6px; font-size: 15px; }
 
-@media (max-width: 1240px) {
+@media (max-width: 1420px) {
   .nav a .label { display: none; }
   .nav a { padding: 9px 10px; }
   .topbar-actions .hide-sm { display: none; }
@@ -383,6 +391,10 @@ table.data select { min-height: 32px; }
 .toast.red { border-left-color: var(--red); }
 .toast.blue { border-left-color: var(--brand); }
 .toast .tt { font-weight: 700; }
+.toast-body { flex: 1; min-width: 0; }
+.toast-x { flex: none; margin: -4px -6px 0 4px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.toast-x:hover { background: var(--surface2); color: var(--text); }
+.toast-x:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .banner-top { position: fixed; top: 86px; left: 50%; transform: translateX(-50%); z-index: 110; padding: 12px 26px; border-radius: 999px;
   background: linear-gradient(90deg, #71347b, #c026d3); color: #fff; font-size: 22px; font-weight: 700; letter-spacing: 0.02em; box-shadow: 0 14px 40px rgba(113, 52, 123, 0.4); display: flex; gap: 10px; align-items: center; white-space: nowrap; }
 .banner-top svg { color: #ffe08a; }
@@ -465,7 +477,46 @@ table.data select { min-height: 32px; }
 .empty { text-align: center; padding: 32px 10px; color: var(--muted); }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .login-card { width: min(440px, 100%); }
+.pw-wrap { position: relative; display: flex; align-items: center; }
+.pw-wrap input { width: 100%; padding-right: 42px; }
+.pw-toggle {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px;
+}
+.pw-toggle:hover { color: var(--brand); background: var(--surface2); }
 .chart-box { width: 100%; height: 260px; }
 .kbd { font-family: ui-monospace, monospace; font-size: 12px; background: var(--surface3); color: var(--brand); border-radius: 6px; padding: 1px 6px; }
 .diff-from { color: var(--red); text-decoration: line-through; opacity: 0.85; }
 .diff-to { color: var(--green); font-weight: 600; }
+
+/* ---------------------------------------------------------------- team set-up wizard */
+.stepper { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 20px; padding: 0; counter-reset: s; }
+.stepper li button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); font: inherit; color: var(--muted); cursor: pointer; text-align: left; }
+.stepper li button:disabled { cursor: default; }
+.stepper .dot { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--surface2); color: var(--muted); border: 1px solid var(--line); }
+.stepper .lbl { font-weight: 600; font-size: 13.5px; line-height: 1.2; }
+.stepper li.current button { border-color: var(--brand); color: var(--text); box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12); }
+.stepper li.current .dot { background: var(--brand); color: #fff; border-color: var(--brand); }
+.stepper li.done .dot { background: var(--green); color: #fff; border-color: var(--green); }
+.stepper li.done button { color: var(--text); }
+@media (max-width: 640px) { .stepper { grid-template-columns: repeat(4, auto); } .stepper .lbl { display: none; } }
+.step-intro { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+.setup-section { border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.setup-section h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .pill { font-size: 12.5px; padding: 4px 6px 4px 10px; }
+.chip-x { border: 0; background: transparent; color: inherit; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; opacity: 0.7; }
+.chip-x:hover { opacity: 1; background: rgba(0, 0, 0, 0.08); }
+.check-list { margin: 8px 0 0 18px; font-size: 13px; display: grid; gap: 4px; }
+.notice.green { background: var(--green-bg, #e9f8ef); border-color: rgba(34, 163, 90, 0.3); color: #155d34; }
+.setup-done { text-align: center; padding: 20px 12px 6px; display: grid; justify-items: center; gap: 8px; }
+.setup-done h3 { font-size: 22px; }
+.setup-done p { max-width: 560px; }
+
+/* ---------------------------------------------------------------- F2F country picker */
+.country-picker { display: grid; gap: 10px; }
+.country-picker > select { max-width: 360px; }
+.country-chip { gap: 6px; }
+.country-adv summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand); }
+.country-adv[open] summary { margin-bottom: 4px; }

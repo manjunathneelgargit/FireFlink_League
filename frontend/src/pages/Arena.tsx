@@ -93,7 +93,7 @@ export default function Arena() {
               <div style={{ textAlign: 'center' }}><div className="num" style={{ fontSize: 'clamp(28px,3vw,60px)', lineHeight: 1 }}>{s.f2f.achieved}</div><div className="arena-small">of {s.f2f.target}</div></div>
             </Ring>
             <div className="col" style={{ gap: '0.6vh' }}>
-              <div className="display" style={{ fontSize: 'clamp(18px,1.6vw,32px)', fontWeight: 800 }}><Plane size={22} /> F2F 45 challenge</div>
+              <div className="display" style={{ fontSize: 'clamp(18px,1.6vw,32px)', fontWeight: 800 }}><Plane size={22} /> F2F {s.f2f.target} challenge</div>
               <div className="arena-small">{s.f2f.remaining} to go · {s.f2f.percent}% · {s.f2f.scheduled_pipeline.total} F2F scheduled</div>
               <div className="arena-small">Leader: <b className="gold">{s.f2f.leaders.map((l) => l.bd_name).join(' & ') || '—'}</b></div>
             </div>

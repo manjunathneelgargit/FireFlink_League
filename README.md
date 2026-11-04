@@ -80,6 +80,29 @@ Change `ADMIN_PASSWORD` in `.env` before first start. After the admin exists, th
 
 ---
 
+## Teams (multi-team league)
+
+Several teams can use one installation. Each team has its own BD members, demos, revenue, leaderboards,
+awards, activity feed, audit log, **Google Sheet link**, **league settings** (dates, daily target, cutoff,
+prizes) and **Arena display link**. Teams never see each other's data.
+
+- **Super admin** manages every team: **Reports & Settings → Teams & logins** creates teams and logins, and the
+  selector in the top bar switches which team every screen shows. `manage.py create-admin` creates a super admin.
+- **Team admin** logins see and manage only their own team (they cannot open Teams & logins).
+- New teams start with the default league settings (1 Nov – 20 Dec 2026, target 1/day, 23:59 cutoff), or a copy of
+  another team's. Change each team's dates under League settings, for example for a later event.
+- **Sheet format rules** (per team, League settings → Live Google Sheet):
+  - *Which completed demos count*: "Only Qualified = Yes" (APAC) or "Every Completed demo" (new teams; a demo
+    explicitly marked Qualified = No is still excluded).
+  - *F2F when Demo Type is blank*: "From Country / City" (new teams) treats a demo whose Country or City maps to
+    Malaysia, Singapore or the Middle East as F2F.
+  - Tabs are always `Demos_and_Pipelines` and `League_Revenue`. Required demo columns: Sl No, BD, Customer Name,
+    Domain, Country **or** City, Demo On, Demo Date, Status, plus Qualified Demo and Demo Type when the rules need
+    them. A column missing from the sheet never overwrites what the app already holds.
+- Upgrading an existing database is automatic on start: existing data becomes the **APAC** team, existing logins
+  become super admins, and a SQLite backup is written to `backend/backups/` first.
+- `manage.py import-workbook <file.xlsx> [team-slug]` imports into a specific team.
+
 ## Live Google Sheet mode (on)
 
 The app reads the Google Sheet **live**. A background worker downloads the sheet every 60 seconds (configurable,

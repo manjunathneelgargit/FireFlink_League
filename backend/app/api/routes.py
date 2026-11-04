@@ -10,12 +10,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import auth
-from ..config import EDITABLE_KEYS, load_config, load_raw, save_setting, to_config
+from ..config import DEFAULTS, EDITABLE_KEYS, NEW_TEAM_DEFAULTS, load_config, load_raw, save_setting, to_config
 from ..constants import (CONTRACT_STATUSES, CURRENCY_OPTIONS, DEMO_ON_OPTIONS, DEMO_STATUSES, DEMO_TYPES,
                          OPPORTUNITY_OPTIONS, POC_STATUSES)
 from ..db import get_db
-from ..models import (ActivityEvent, AdminUser, AuditLog, AwardFinalization, BDMember, DayClosure, DemoRecord,
-                      ExchangeRate, ImportHistory, RevenueRecord)
+from ..models import (ROLE_SUPER, ROLE_TEAM, ActivityEvent, AdminUser, AuditLog, AuthSession, AwardFinalization,
+                      BDMember, DayClosure, DemoRecord, ExchangeRate, ImportHistory, RevenueRecord, Setting, Team)
+from ..tenancy import bind_team
 from ..services import exporter as X
 from ..services import gsheet as G
 from ..services import importer as I
@@ -26,6 +27,8 @@ from .serializers import demo_out, revenue_out
 
 router = APIRouter(prefix="/api")
 Admin = Depends(auth.current_admin)
+Super = Depends(auth.super_admin)
+SignedIn = Depends(auth.signed_in)
 
 
 def _commit(db: Session):
@@ -101,13 +104,16 @@ def login(body: LoginIn, request: Request, response: Response, db: Session = Dep
     if not user or not auth.verify_password(body.password, user.password_hash):
         auth.record_failure(key)
         raise HTTPException(401, "Invalid username or password")
+    if not user.is_super and (user.team is None or not user.team.active):
+        raise HTTPException(403, "Your team is not active - contact the super admin")
     auth.clear_failures(key)
     token = auth.create_session(db, user)
+    bind_team(db, auth.resolve_team(request, db, user).id)
     R.audit(db, user.username, "auth", user.id, "login")
     _commit(db)
     response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax", secure=auth.COOKIE_SECURE,
                         max_age=auth.SESSION_HOURS * 3600, path="/")
-    return {"username": user.username}
+    return {"username": user.username, "role": user.role}
 
 
 @router.post("/auth/logout")
@@ -118,9 +124,16 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+def _team_out(t: Team) -> dict:
+    return {"id": t.id, "name": t.name, "slug": t.slug, "active": t.active}
+
+
 @router.get("/auth/me")
-def me(user: AdminUser = Admin):
-    return {"username": user.username}
+def me(request: Request, user: AdminUser = SignedIn, db: Session = Depends(get_db)):
+    team = auth.resolve_team(request, db, user)
+    teams = db.query(Team).order_by(Team.name).all() if user.is_super else [team]
+    return {"username": user.username, "role": user.role, "is_super": user.is_super,
+            "team": _team_out(team), "teams": [_team_out(t) for t in teams]}
 
 
 class PasswordIn(BaseModel):
@@ -129,11 +142,12 @@ class PasswordIn(BaseModel):
 
 
 @router.post("/auth/password")
-def change_password(body: PasswordIn, user: AdminUser = Admin, db: Session = Depends(get_db)):
+def change_password(body: PasswordIn, request: Request, user: AdminUser = SignedIn, db: Session = Depends(get_db)):
     if not auth.verify_password(body.current_password, user.password_hash):
         raise HTTPException(400, "Current password is incorrect")
     u = db.get(AdminUser, user.id)
     u.password_hash = auth.hash_password(body.new_password)
+    bind_team(db, auth.resolve_team(request, db, user).id)
     R.audit(db, user.username, "auth", user.id, "password_change")
     _commit(db)
     return {"ok": True}
@@ -147,6 +161,7 @@ def meta(user: AdminUser = Admin, db: Session = Depends(get_db)):
     dom = sorted({x for (x,) in db.query(DemoRecord.domain).distinct() if x} |
                  {x for (x,) in db.query(RevenueRecord.domain).distinct() if x})
     cty = sorted({x for (x,) in db.query(DemoRecord.country).distinct() if x} |
+                 {x for (x,) in db.query(DemoRecord.city).distinct() if x} |
                  {x for (x,) in db.query(RevenueRecord.country).distinct() if x})
     cur = sorted(set(CURRENCY_OPTIONS) | {x for (x,) in db.query(RevenueRecord.currency).distinct() if x} |
                  {r.currency for r in db.query(ExchangeRate).all()})
@@ -157,6 +172,7 @@ def meta(user: AdminUser = Admin, db: Session = Depends(get_db)):
         "opportunity_options": OPPORTUNITY_OPTIONS, "currencies": cur, "domains": dom, "countries": cty,
         "regions": list(cfg.f2f_regions.keys()), "timezone": cfg.timezone,
         "live_mode": live_mode(db), "sheet_url": load_raw(db).get("gsheet_url"),
+        "require_qualified": cfg.require_qualified, "f2f_from_location": cfg.f2f_from_location,
     }
 
 
@@ -220,7 +236,7 @@ def bd_performance(bd_id: int, user: AdminUser = Admin, db: Session = Depends(ge
         "counts": {
             "scheduled": sum(1 for d in demos if d.status == "Scheduled"),
             "completed": sum(1 for d in demos if d.status == "Completed"),
-            "completed_unqualified": sum(1 for d in demos if d.status == "Completed" and d.qualified != "Yes"),
+            "completed_unqualified": sum(1 for d in demos if L.is_completed_unqualified(d, cfg)),
             "no_show": sum(1 for d in demos if d.status == "No Show"),
             "pipeline": sum(1 for d in demos if d.status == "Pipeline"),
         },
@@ -239,6 +255,7 @@ class DemoIn(BaseModel):
     customer_name: str
     domain: str | None = None
     country: str | None = None
+    city: str | None = None
     demo_type: str | None = None
     demo_on: str | None = None
     demo_date: date | None = None
@@ -465,7 +482,7 @@ def close_day(day: date, user: AdminUser = Admin, db: Session = Depends(get_db))
         raise HTTPException(422, "Sunday is a non-working day - there is no target to close")
     if not L.in_league(day, cfg):
         raise HTTPException(422, "Day is outside the league period")
-    if db.get(DayClosure, day):
+    if db.query(DayClosure).filter(DayClosure.day == day).first():
         return {"ok": True, "already": True}
     before_sig = R.ranks_signature(db)
     db.add(DayClosure(day=day, closed_by=user.username))
@@ -480,7 +497,7 @@ def close_day(day: date, user: AdminUser = Admin, db: Session = Depends(get_db))
 @router.post("/days/{day}/reopen")
 def reopen_day(day: date, user: AdminUser = Admin, db: Session = Depends(get_db)):
     cfg = load_config(db)
-    c = db.get(DayClosure, day)
+    c = db.query(DayClosure).filter(DayClosure.day == day).first()
     if not c:
         raise HTTPException(404, "Day was not manually closed")
     if L.day_is_closed(day, cfg, L.now_local(cfg), set()):
@@ -583,7 +600,8 @@ def _apply_filters(db: Session, f: Filters):
             return False
         if cust and cust not in (r.customer_name or "").lower():
             return False
-        if f.countries and (r.country or "").lower() not in lower(f.countries):
+        if f.countries and not ({(r.country or "").lower(), (getattr(r, "city", None) or "").lower()}
+                                & lower(f.countries)):
             return False
         if f.domains and (r.domain or "").lower() not in lower(f.domains):
             return False
@@ -593,7 +611,7 @@ def _apply_filters(db: Session, f: Filters):
     for d in demos:
         if not common(d, d.demo_date):
             continue
-        if f.demo_types and (d.demo_type or "(blank)") not in f.demo_types:
+        if f.demo_types and (L.demo_kind(d, cfg) or "(blank)") not in f.demo_types:
             continue
         if f.statuses and d.status not in f.statuses:
             continue
@@ -626,21 +644,23 @@ def report_query(f: Filters, user: AdminUser = Admin, db: Session = Depends(get_
         if row is None:
             continue
         row["records"] += 1
-        ach = L.is_achieved_demo(d)
+        ach = L.is_achieved_demo(d, cfg)
+        kind = L.demo_kind(d, cfg)
         if ach:
             row["qualified"] += 1
-            if d.demo_type == "F2F":
+            if kind == "F2F":
                 row["f2f"] += 1
-            elif d.demo_type == "Virtual":
+            elif kind == "Virtual":
                 row["virtual"] += 1
             k = d.demo_date.isoformat()
             by_date[k] = by_date.get(k, 0) + 1
         row["scheduled"] += d.status == "Scheduled"
         row["completed"] += d.status == "Completed"
-        row["completed_unqualified"] += d.status == "Completed" and d.qualified != "Yes"
+        row["completed_unqualified"] += L.is_completed_unqualified(d, cfg)
         by_status[d.status] = by_status.get(d.status, 0) + 1
-        by_country[d.country or "Unspecified"] = by_country.get(d.country or "Unspecified", 0) + 1
-        t = d.demo_type or "(blank)"
+        place = d.country or d.city or "Unspecified"
+        by_country[place] = by_country.get(place, 0) + 1
+        t = kind or "(blank)"
         by_type[t] = by_type.get(t, 0) + 1
     rev_total = 0.0
     for r in fr:
@@ -653,13 +673,13 @@ def report_query(f: Filters, user: AdminUser = Admin, db: Session = Depends(get_
         "notice": "Analytical view only - official league standings and awards always use complete league data.",
         "matching": {"demos": len(fd), "revenue": len(fr), "total": len(fd) + len(fr)},
         "kpis": {
-            "qualified_completed": sum(1 for d in fd if L.is_achieved_demo(d)),
-            "qualified_f2f": sum(1 for d in fd if L.is_achieved_demo(d) and d.demo_type == "F2F"),
-            "qualified_virtual": sum(1 for d in fd if L.is_achieved_demo(d) and d.demo_type == "Virtual"),
+            "qualified_completed": sum(1 for d in fd if L.is_achieved_demo(d, cfg)),
+            "qualified_f2f": sum(1 for d in fd if L.is_achieved_demo(d, cfg) and L.demo_kind(d, cfg) == "F2F"),
+            "qualified_virtual": sum(1 for d in fd if L.is_achieved_demo(d, cfg) and L.demo_kind(d, cfg) == "Virtual"),
             "scheduled": sum(1 for d in fd if d.status == "Scheduled"),
-            "scheduled_f2f": sum(1 for d in fd if d.status == "Scheduled" and d.demo_type == "F2F"),
-            "scheduled_virtual": sum(1 for d in fd if d.status == "Scheduled" and d.demo_type == "Virtual"),
-            "completed_unqualified": sum(1 for d in fd if d.status == "Completed" and d.qualified != "Yes"),
+            "scheduled_f2f": sum(1 for d in fd if d.status == "Scheduled" and L.demo_kind(d, cfg) == "F2F"),
+            "scheduled_virtual": sum(1 for d in fd if d.status == "Scheduled" and L.demo_kind(d, cfg) == "Virtual"),
+            "completed_unqualified": sum(1 for d in fd if L.is_completed_unqualified(d, cfg)),
             "revenue_inr": round(rev_total, 2),
             "pending_conversion": sum(1 for r in fr if evs[r.id]["pending_conversion"]),
         },
@@ -786,6 +806,13 @@ def import_history(user: AdminUser = Admin, db: Session = Depends(get_db)):
 
 
 # ----------------------------------------------------------------------------------------- settings
+@router.get("/countries")
+def countries(user: AdminUser = Admin):
+    """Country catalog for the F2F country picker (names + the spellings/cities each one matches)."""
+    from ..countries import catalog
+    return catalog()
+
+
 @router.get("/settings")
 def get_settings(user: AdminUser = Admin, db: Session = Depends(get_db)):
     raw = load_raw(db)
@@ -806,9 +833,17 @@ def put_settings(body: dict[str, Any], user: AdminUser = Admin, db: Session = De
         assert cfg.league_start <= cfg.league_end, "League start must be on/before league end"
         assert 0 <= cfg.week_start_day <= 6, "week_start_day must be 0-6"
         assert cfg.f2f_target > 0, "F2F target must be positive"
+        assert 1 <= cfg.daily_target <= 20, "Daily target must be between 1 and 20"
+        regions = trial.get("f2f_regions")
+        assert isinstance(regions, dict) and all(
+            isinstance(k, str) and k.strip() and isinstance(v, list) and all(isinstance(a, str) for a in v)
+            for k, v in regions.items()), "F2F countries must map a name to a list of spellings"
+        assert all(v for v in regions.values()), "Every F2F country needs at least one spelling to match"
         assert int(trial.get("gsheet_sync_interval_seconds") or 60) >= 30, "Sync interval must be at least 30 seconds"
         if trial.get("gsheet_sync_enabled"):
             assert G.sheet_id(trial.get("gsheet_url") or ""), "Enter a valid Google Sheets link"
+        for k in ("count_requires_qualified", "f2f_from_location", "gsheet_sync_enabled"):
+            assert isinstance(trial.get(k), bool), f"{k} must be true or false"
     except (AssertionError, ValueError, KeyError, TypeError, AttributeError) as e:
         raise HTTPException(422, f"Invalid settings: {e}")
     changed = {k: v for k, v in body.items() if raw.get(k) != v}
@@ -836,6 +871,28 @@ def gsheet_sync_now(user: AdminUser = Admin, db: Session = Depends(get_db)):
     if st.get("error"):
         raise HTTPException(502, st["error"])
     return {**sync_public(db), "summary": st.get("summary")}
+
+
+class SheetCheckIn(BaseModel):
+    url: str
+    count_requires_qualified: bool | None = None  # check against rules not saved yet (set-up wizard)
+    f2f_from_location: bool | None = None
+
+
+@router.post("/gsheet/check")
+def gsheet_check(body: SheetCheckIn, user: AdminUser = Admin, db: Session = Depends(get_db)):
+    """Download the sheet and report tabs / columns / BD names for this team. Saves nothing."""
+    if not G.sheet_id(body.url):
+        raise HTTPException(422, "Enter a valid Google Sheets link")
+    raw = load_raw(db)
+    for k in ("count_requires_qualified", "f2f_from_location"):
+        if getattr(body, k) is not None:
+            raw[k] = getattr(body, k)
+    try:
+        content = G.fetch_xlsx(body.url)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    return G.inspect_workbook(db, content, to_config(raw))
 
 
 @router.post("/settings/arena-link")
@@ -901,6 +958,23 @@ def edit_bd(bd_id: int, body: BDIn, user: AdminUser = Admin, db: Session = Depen
     return {"ok": True}
 
 
+@router.delete("/bds/{bd_id}")
+def delete_bd(bd_id: int, user: AdminUser = Admin, db: Session = Depends(get_db)):
+    """Remove a BD added by mistake. BDs with any demo or revenue history can only be deactivated."""
+    b = db.get(BDMember, bd_id)
+    if not b:
+        raise HTTPException(404, "BD not found")
+    used = (db.query(DemoRecord).filter(DemoRecord.bd_id == bd_id).count() +
+            db.query(RevenueRecord).filter(RevenueRecord.bd_id == bd_id).count())
+    if used:
+        raise HTTPException(409, f"{b.name} has {used} record(s) - deactivate instead of deleting")
+    db.query(ActivityEvent).filter(ActivityEvent.bd_id == bd_id).delete()
+    R.audit(db, user.username, "bd", b.id, "delete", before={"name": b.name})
+    db.delete(b)
+    _commit(db)
+    return {"ok": True}
+
+
 @router.get("/audit")
 def audit_log(limit: int = 200, entity: str | None = None, user: AdminUser = Admin, db: Session = Depends(get_db)):
     q = db.query(AuditLog)
@@ -909,3 +983,189 @@ def audit_log(limit: int = 200, entity: str | None = None, user: AdminUser = Adm
     return [{"id": a.id, "at": a.at.isoformat() + "Z", "actor": a.actor, "entity": a.entity, "entity_id": a.entity_id,
              "action": a.action, "before": a.before, "after": a.after, "note": a.note}
             for a in q.order_by(AuditLog.id.desc()).limit(min(limit, 2000))]
+
+
+# ----------------------------------------------------------------------------------------- teams & logins
+_SLUG_RE = __import__("re").compile(r"[^a-z0-9]+")
+TEAM_PRIVATE_SETTINGS = {"gsheet_url", "gsheet_sync_enabled", G.STATUS_KEY, "arena_token_hash"}
+
+
+def _slugify(s: str) -> str:
+    return _SLUG_RE.sub("-", s.lower()).strip("-")[:60] or "team"
+
+
+class TeamIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    slug: str | None = Field(default=None, max_length=60)
+    copy_settings_from: int | None = None  # copy league settings (dates, targets, prizes...) from this team
+
+
+class TeamEdit(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    active: bool | None = None
+
+
+@router.get("/teams")
+def list_teams(user: AdminUser = Super, db: Session = Depends(get_db)):
+    from ..tenancy import unscoped
+    from sqlalchemy import func
+    unscoped(db)
+    def counts(model, *flt):
+        q = db.query(model.team_id, func.count()).filter(*flt).group_by(model.team_id)
+        return dict(q.all())
+    bds = counts(BDMember, BDMember.active.is_(True))
+    demos = counts(DemoRecord, DemoRecord.deleted_at.is_(None))
+    revs = counts(RevenueRecord, RevenueRecord.deleted_at.is_(None))
+    logins = dict(db.query(AdminUser.team_id, func.count()).group_by(AdminUser.team_id).all())
+    sheets = {r.team_id: r.value for r in db.query(Setting).filter(Setting.key == "gsheet_url")}
+    live = {r.team_id: r.value for r in db.query(Setting).filter(Setting.key == "gsheet_sync_enabled")}
+    return [{**_team_out(t), "created_at": t.created_at.isoformat() + "Z", "bds": bds.get(t.id, 0),
+             "demos": demos.get(t.id, 0), "revenue": revs.get(t.id, 0), "logins": logins.get(t.id, 0),
+             "sheet_url": sheets.get(t.id, DEFAULTS["gsheet_url"]) or None,
+             "live_sync": bool(live.get(t.id, DEFAULTS["gsheet_sync_enabled"]))}
+            for t in db.query(Team).order_by(Team.name)]
+
+
+@router.post("/teams")
+def create_team(body: TeamIn, user: AdminUser = Super, db: Session = Depends(get_db)):
+    name = " ".join(body.name.split())
+    slug = _slugify(body.slug or name)
+    if db.query(Team).filter((Team.name.ilike(name)) | (Team.slug == slug)).first():
+        raise HTTPException(409, "A team with this name already exists")
+    src_settings = {}
+    if body.copy_settings_from:
+        if not db.get(Team, body.copy_settings_from):
+            raise HTTPException(404, "Team to copy settings from not found")
+        bind_team(db, body.copy_settings_from)
+        src_settings = {k: v for k, v in load_raw(db).items() if k not in TEAM_PRIVATE_SETTINGS}
+    t = Team(name=name, slug=slug)
+    db.add(t)
+    db.flush()
+    bind_team(db, t.id)
+    # Copied league settings (dates, targets, prizes...) + the new-team sheet rules.
+    values = {**{k: v for k, v in src_settings.items() if k in EDITABLE_KEYS}, **NEW_TEAM_DEFAULTS}
+    if not body.copy_settings_from:
+        # Teams work in different countries: a fresh team picks its own F2F countries in set-up.
+        values.update(f2f_regions={}, f2f_windows=[])
+    for k, v in values.items():
+        if DEFAULTS.get(k) != v or k in NEW_TEAM_DEFAULTS:
+            db.add(Setting(key=k, value=v))
+    R.audit(db, user.username, "team", t.id, "create", after={"name": name, "slug": slug,
+                                                              "copied_from": body.copy_settings_from})
+    _commit(db)
+    return _team_out(t)
+
+
+@router.put("/teams/{team_id}")
+def edit_team(team_id: int, body: TeamEdit, user: AdminUser = Super, db: Session = Depends(get_db)):
+    t = db.get(Team, team_id)
+    if not t:
+        raise HTTPException(404, "Team not found")
+    before = _team_out(t)
+    if body.name is not None:
+        name = " ".join(body.name.split())
+        if db.query(Team).filter(Team.name.ilike(name), Team.id != team_id).first():
+            raise HTTPException(409, "Another team already has this name")
+        t.name = name
+    if body.active is not None:
+        if not body.active and db.query(Team).filter(Team.active.is_(True), Team.id != team_id).count() == 0:
+            raise HTTPException(422, "At least one team must stay active")
+        t.active = body.active
+    bind_team(db, t.id)
+    R.audit(db, user.username, "team", t.id, "update", before=before, after=_team_out(t))
+    _commit(db)
+    return _team_out(t)
+
+
+class UserIn(BaseModel):
+    username: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9._@-]+$")
+    password: str = Field(min_length=10)
+    role: str = ROLE_TEAM
+    team_id: int | None = None
+
+
+class UserEdit(BaseModel):
+    password: str | None = Field(default=None, min_length=10)
+    role: str | None = None
+    team_id: int | None = None
+
+
+def _user_out(u: AdminUser) -> dict:
+    return {"id": u.id, "username": u.username, "role": u.role, "team_id": u.team_id,
+            "team_name": u.team.name if u.team else None, "created_at": u.created_at.isoformat() + "Z"}
+
+
+def _check_role(db: Session, role: str, team_id: int | None):
+    if role not in (ROLE_SUPER, ROLE_TEAM):
+        raise HTTPException(422, "Role must be super_admin or team_admin")
+    if role == ROLE_TEAM:
+        if not team_id or not db.get(Team, team_id):
+            raise HTTPException(422, "A team admin must belong to a team")
+
+
+@router.get("/users")
+def list_users(user: AdminUser = Super, db: Session = Depends(get_db)):
+    return [_user_out(u) for u in db.query(AdminUser).order_by(AdminUser.role.desc(), AdminUser.username)]
+
+
+@router.post("/users")
+def create_user(body: UserIn, user: AdminUser = Super, db: Session = Depends(get_db)):
+    _check_role(db, body.role, body.team_id)
+    if db.query(AdminUser).filter(AdminUser.username.ilike(body.username)).first():
+        raise HTTPException(409, "This username is already taken")
+    u = AdminUser(username=body.username, password_hash=auth.hash_password(body.password), role=body.role,
+                  team_id=body.team_id if body.role == ROLE_TEAM else None)
+    db.add(u)
+    db.flush()
+    R.audit(db, user.username, "user", u.id, "create", after={"username": u.username, "role": u.role,
+                                                              "team_id": u.team_id})
+    _commit(db)
+    db.refresh(u)
+    return _user_out(u)
+
+
+def _super_count(db: Session, exclude: int | None = None) -> int:
+    q = db.query(AdminUser).filter(AdminUser.role == ROLE_SUPER)
+    if exclude:
+        q = q.filter(AdminUser.id != exclude)
+    return q.count()
+
+
+@router.put("/users/{user_id}")
+def edit_user(user_id: int, body: UserEdit, user: AdminUser = Super, db: Session = Depends(get_db)):
+    u = db.get(AdminUser, user_id)
+    if not u:
+        raise HTTPException(404, "Login not found")
+    role = body.role or u.role
+    team_id = body.team_id if body.team_id is not None else u.team_id
+    _check_role(db, role, team_id)
+    if u.role == ROLE_SUPER and role != ROLE_SUPER and _super_count(db, exclude=u.id) == 0:
+        raise HTTPException(422, "At least one super admin must remain")
+    before = {"role": u.role, "team_id": u.team_id}
+    u.role, u.team_id = role, (team_id if role == ROLE_TEAM else None)
+    if body.password:
+        u.password_hash = auth.hash_password(body.password)
+        if u.id != user.id:  # sign the user out everywhere after a reset
+            db.query(AuthSession).filter(AuthSession.user_id == u.id).delete()
+    R.audit(db, user.username, "user", u.id, "update", before=before,
+            after={"role": u.role, "team_id": u.team_id, "password_reset": bool(body.password)})
+    _commit(db)
+    db.refresh(u)
+    return _user_out(u)
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, user: AdminUser = Super, db: Session = Depends(get_db)):
+    u = db.get(AdminUser, user_id)
+    if not u:
+        raise HTTPException(404, "Login not found")
+    if u.id == user.id:
+        raise HTTPException(422, "You cannot delete your own login")
+    if u.role == ROLE_SUPER and _super_count(db, exclude=u.id) == 0:
+        raise HTTPException(422, "At least one super admin must remain")
+    db.query(AuthSession).filter(AuthSession.user_id == u.id).delete()
+    R.audit(db, user.username, "user", u.id, "delete", before={"username": u.username, "role": u.role,
+                                                               "team_id": u.team_id})
+    db.delete(u)
+    _commit(db)
+    return {"ok": True}

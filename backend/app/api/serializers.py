@@ -9,14 +9,15 @@ def demo_out(d: DemoRecord, cfg: LeagueConfig, now=None) -> dict:
     tr = L.time_remaining(d.demo_date, d.demo_time, d.time_zone, cfg, now)
     return {
         "id": d.id, "sl_no": d.sl_no, "bd_id": d.bd_id, "bd_name": d.bd.name if d.bd else None,
-        "customer_name": d.customer_name, "domain": d.domain, "country": d.country, "demo_type": d.demo_type,
+        "customer_name": d.customer_name, "domain": d.domain, "country": d.country, "city": d.city,
+        "demo_type": d.demo_type, "effective_type": L.demo_kind(d, cfg),
         "demo_on": d.demo_on, "demo_date": d.demo_date.isoformat() if d.demo_date else None,
         "demo_time": d.demo_time.strftime("%H:%M") if d.demo_time else None, "time_zone": d.time_zone,
         "time_remaining": tr["label"], "time_remaining_seconds": tr["seconds"], "demo_at": tr["demo_at"],
         "status": d.status, "qualified": d.qualified,
         "counts": L.counts_for_league(d, cfg), "counts_f2f": L.counts_for_f2f(d, cfg),
-        "achieved": L.is_achieved_demo(d), "in_league": L.in_league(d.demo_date, cfg),
-        "region": L.region_of(d.country, cfg),
+        "achieved": L.is_achieved_demo(d, cfg), "in_league": L.in_league(d.demo_date, cfg),
+        "region": L.demo_region(d, cfg),
         "poc_started_on": d.poc_started_on.isoformat() if d.poc_started_on else None,
         "poc_status_updated_at": (d.poc_status_updated_at.isoformat() + "Z") if d.poc_status_updated_at else None,
         "poc_remarks": d.poc_remarks, "source": d.source,

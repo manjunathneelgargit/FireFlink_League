@@ -6,7 +6,8 @@ import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import SessionLocal
+from app.db import SessionLocal  # noqa: F401
+from app.tenancy import team_session
 from app.models import BDMember, DemoRecord
 from app.services import gsheet as G
 
@@ -22,20 +23,20 @@ def _bytes(wb):
 
 
 def _sync(content):
-    with SessionLocal() as db:
+    with team_session() as db:
         out = G.sync(db, content)
         db.commit()
         return out
 
 
 def _demos():
-    with SessionLocal() as db:
+    with team_session() as db:
         return {d.customer_name: d for d in db.query(DemoRecord).filter(DemoRecord.deleted_at.is_(None))}
 
 
 @pytest.fixture()
 def seeded(fresh_db):
-    with SessionLocal() as db:
+    with team_session() as db:
         for i, n in enumerate(NAMES):
             db.add(BDMember(name=n, display_order=i))
         db.commit()
@@ -103,8 +104,8 @@ def test_unknown_bd_is_rejected_not_created(seeded):
 def test_live_mode_locks_sheet_fields_but_allows_app_only_fields(seeded):
     from app.auth import hash_password
     from app.models import AdminUser
-    with SessionLocal() as db:
-        db.add(AdminUser(username="admin", password_hash=hash_password("correct-horse-1")))
+    with team_session() as db:
+        db.add(AdminUser(username="admin", password_hash=hash_password("correct-horse-1"), role="super_admin"))
         db.commit()
     from app.main import app
     H = {"X-Requested-With": "ffl"}

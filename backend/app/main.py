@@ -9,10 +9,12 @@ from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401 - register tables
 from .api.routes import router
-from .db import Base, SessionLocal, engine
+from . import tenancy  # noqa: F401 - registers the team-isolation session hooks
+from .db import SessionLocal, engine
+from .migrate import ensure_schema
 from .services import gsheet
 
-Base.metadata.create_all(engine)
+ensure_schema(engine)
 
 
 @asynccontextmanager
@@ -38,6 +40,17 @@ async def security_headers(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         resp.headers.setdefault("Cache-Control", "no-store")
     return resp
+
+
+UNKNOWN_API = ("This server does not have {method} /{path}. If the app was just updated, the server is still running "
+               "the old version - stop it and run ./start.sh again.")
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+def api_not_found(path: str, request: Request):
+    """Any /api route that doesn't exist - for every method, so the app shows a clear message instead of
+    'Method Not Allowed' (usually a server that hasn't been restarted after an update)."""
+    return JSONResponse({"detail": UNKNOWN_API.format(method=request.method, path=f"api/{path}")}, 404)
 
 
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"

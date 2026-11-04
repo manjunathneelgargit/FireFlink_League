@@ -25,7 +25,7 @@ import openpyxl
 from sqlalchemy.orm import Session
 
 from ..config import load_config, load_raw, save_setting
-from ..constants import DEMO_HEADERS, DEMO_IGNORED_HEADERS, DEMO_SHEET, REVENUE_HEADERS, REVENUE_SHEET
+from ..constants import DEMO_IGNORED_HEADERS, DEMO_SHEET, REVENUE_HEADERS, REVENUE_SHEET
 from ..models import BDMember, DemoRecord, RevenueRecord, utcnow
 from . import importer as I
 from . import league as L
@@ -70,6 +70,38 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ----------------------------------------------------------------------------------------- check
+def inspect_workbook(db: Session, content: bytes, cfg) -> dict:
+    """Dry run for the team set-up wizard: which tabs / columns are present for this team's rules,
+    how many rows each tab has, and which BD names the sheet uses that the team doesn't have yet.
+    Nothing is written."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    known = {b.name.lower() for b in db.query(BDMember).all()}
+    out = {"ok": True, "sheets": [], "sheet_names": wb.sheetnames, "bd_names": [], "unknown_bds": []}
+    names: dict[str, str] = {}
+    for sheet, headers, mapping, ignored in (
+            (DEMO_SHEET, I.DEMO_READ_HEADERS, I.DEMO_MAP, DEMO_IGNORED_HEADERS),
+            (REVENUE_SHEET, REVENUE_HEADERS, I.REV_MAP, [])):
+        if sheet not in wb.sheetnames:
+            out["ok"] = False
+            out["sheets"].append({"sheet": sheet, "found": False, "missing": [], "rows": 0, "headers": []})
+            continue
+        sh = I.read_sheet(wb[sheet], headers, mapping, ignored)
+        missing = I.demo_missing_required(sh, cfg) if sheet == DEMO_SHEET else sh["missing"]
+        out["ok"] = out["ok"] and not missing
+        for _, raw in sh["rows"]:
+            n = I.p_str(raw.get("bd"))
+            if n:
+                names.setdefault(n.lower(), n)
+        out["sheets"].append({"sheet": sheet, "found": True, "missing": missing, "rows": len(sh["rows"]),
+                              "headers": sh["headers"]})
+    out["bd_names"] = sorted(names.values(), key=str.lower)
+    out["unknown_bds"] = [n for n in out["bd_names"] if n.lower() not in known]
+    return out
+
+
 # ----------------------------------------------------------------------------------------- core
 def sync(db: Session, content: bytes) -> dict:
     """Mirror the workbook into the database. Caller commits."""
@@ -91,18 +123,18 @@ def sync(db: Session, content: bytes) -> dict:
     before_sig = R.ranks_signature(db)
     out = {"alerts": [], "demos": None, "revenue": None}
     for sheet, headers, mapping, ignored, fn in (
-            (DEMO_SHEET, DEMO_HEADERS, I.DEMO_MAP, DEMO_IGNORED_HEADERS, _sync_demos),
+            (DEMO_SHEET, I.DEMO_READ_HEADERS, I.DEMO_MAP, DEMO_IGNORED_HEADERS, _sync_demos),
             (REVENUE_SHEET, REVENUE_HEADERS, I.REV_MAP, [], _sync_revenue)):
         if sheet not in wb.sheetnames:
             out["alerts"].append(f"Worksheet '{sheet}' not found in the Google Sheet - nothing synced for it")
             continue
         sh = I.read_sheet(wb[sheet], headers, mapping, ignored)
-        missing = [m for m in sh["missing"] if m != "Time Remaining"]
+        missing = I.demo_missing_required(sh, cfg) if sheet == DEMO_SHEET else sh["missing"]
         if missing:
             out["alerts"].append(f"{sheet}: missing column(s) {', '.join(missing)} - nothing synced for it")
             continue
         key = "demos" if sheet == DEMO_SHEET else "revenue"
-        out[key] = fn(db, sh["rows"], resolve_bd, today, cfg, out["alerts"])
+        out[key] = fn(db, sh["rows"], resolve_bd, today, cfg, out["alerts"], sh["fields_present"])
     db.flush()
     R.emit_rank_events(db, before_sig, ACTOR)
     return out
@@ -126,7 +158,7 @@ def _pick(cands, claimed, prefer=None):
     return free[0] if free else None
 
 
-def _sync_demos(db, rows, resolve_bd, today, cfg, alerts) -> dict:
+def _sync_demos(db, rows, resolve_bd, today, cfg, alerts, present=None) -> dict:
     allrecs = db.query(DemoRecord).all()
     live = [r for r in allrecs if r.deleted_at is None]
     by_sl = _index(allrecs, lambda r: (r.sl_no, R.norm(r.customer_name)) if r.sl_no is not None else None)
@@ -172,8 +204,10 @@ def _sync_demos(db, rows, resolve_bd, today, cfg, alerts) -> dict:
                         rec.deleted_at = None
                         R.audit(db, ACTOR, "demo", rec.id, "restore", note="row reappeared in Google Sheet")
                     before = R.snapshot_of(rec, R.DEMO_FIELDS)
-                    before["_achieved"] = L.is_achieved_demo(rec)
-                    R.update_demo(db, rec, payload, ACTOR, source="gsheet", emit=False)
+                    before["_achieved"] = L.is_achieved_demo(rec, cfg)
+                    # A column the sheet doesn't have never overwrites what the record already holds.
+                    upd = {k: v for k, v in payload.items() if k == "bd_id" or present is None or k in present}
+                    R.update_demo(db, rec, upd, ACTOR, source="gsheet", emit=False)
                     after = R.snapshot_of(rec, R.DEMO_FIELDS)
                     if any(before.get(k) != after.get(k) for k in R.DEMO_FIELDS):
                         changes.append((before, rec))
@@ -190,7 +224,7 @@ def _sync_demos(db, rows, resolve_bd, today, cfg, alerts) -> dict:
     return res
 
 
-def _sync_revenue(db, rows, resolve_bd, today, cfg, alerts) -> dict:
+def _sync_revenue(db, rows, resolve_bd, today, cfg, alerts, present=None) -> dict:
     allrecs = db.query(RevenueRecord).all()
     live = [r for r in allrecs if r.deleted_at is None]
     by_sl = _index(allrecs, lambda r: (r.sl_no, R.norm(r.customer_name)) if r.sl_no is not None else None)
@@ -322,16 +356,25 @@ def run_once(db: Session, force: bool = False) -> dict:
 
 
 def start_worker(session_factory):
+    """One background thread syncs every active team's sheet, each on its own interval."""
+    from ..models import Team
+    from ..tenancy import bind_team, unscoped
+
     def loop():
-        last = 0.0
+        last: dict[int, float] = {}
         while True:
             try:
                 with session_factory() as db:
-                    raw = load_raw(db)
-                    every = max(30, int(raw.get("gsheet_sync_interval_seconds") or 60))
-                    if raw.get("gsheet_sync_enabled") and raw.get("gsheet_url") and _time.time() - last >= every:
-                        last = _time.time()
-                        run_once(db)
+                    team_ids = [t.id for t in unscoped(db).query(Team).filter(Team.active.is_(True)).all()]
+                for tid in team_ids:
+                    with session_factory() as db:
+                        bind_team(db, tid)
+                        raw = load_raw(db)
+                        every = max(30, int(raw.get("gsheet_sync_interval_seconds") or 60))
+                        if raw.get("gsheet_sync_enabled") and raw.get("gsheet_url") and \
+                                _time.time() - last.get(tid, 0.0) >= every:
+                            last[tid] = _time.time()
+                            run_once(db)
             except Exception:  # pragma: no cover - never let the worker die
                 log.exception("sync worker error")
             _time.sleep(5)

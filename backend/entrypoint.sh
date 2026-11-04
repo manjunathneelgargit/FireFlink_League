@@ -5,12 +5,13 @@ set -e
 if [ -n "${ADMIN_USERNAME:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; then
   python - <<'PY'
 import os
-from app import models  # noqa: F401
+from app import models, tenancy  # noqa: F401
 from app.auth import hash_password
-from app.db import Base, SessionLocal, engine
-from app.models import AdminUser
+from app.db import SessionLocal, engine
+from app.migrate import ensure_schema
+from app.models import ROLE_SUPER, AdminUser
 
-Base.metadata.create_all(engine)
+ensure_schema(engine)
 username = os.environ["ADMIN_USERNAME"]
 password = os.environ["ADMIN_PASSWORD"]
 if len(password) < 10:
@@ -20,9 +21,9 @@ with SessionLocal() as db:
     if user:
         print(f"Admin '{username}' already exists — leaving password unchanged")
     else:
-        db.add(AdminUser(username=username, password_hash=hash_password(password)))
+        db.add(AdminUser(username=username, password_hash=hash_password(password), role=ROLE_SUPER))
         db.commit()
-        print(f"Admin '{username}' created")
+        print(f"Super admin '{username}' created")
 PY
 fi
 

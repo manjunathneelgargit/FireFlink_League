@@ -45,7 +45,8 @@ def build(db: Session, now: datetime | None = None, cfg: LeagueConfig | None = N
     overall = L.overall_leaderboard(cfg, bds, demos, daily, revenue, now_l)
     f2f = L.f2f_challenge(cfg, bds, demos)
     fin = finalized_map(db)
-    weeks = L.weekly_results(cfg, bds, demos, fin, now_l)
+    weeks = L.weekly_results(cfg, bds, demos, fin, now_l, daily=daily, revenues=revenues,
+                             rates=rates, prize_amount=prize)
     awards = L.award_overview(cfg, bds, demos, revenue, f2f, weeks, fin, now_l)
 
     per_bd = daily["per_bd"]

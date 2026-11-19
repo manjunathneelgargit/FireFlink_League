@@ -85,7 +85,8 @@ def _guard_live_update(db: Session, rec, payload: dict, fields: list[str], app_o
 def sync_public(db: Session) -> dict:
     raw = load_raw(db)
     st = raw.get(G.STATUS_KEY) or {}
-    return {"enabled": live_mode(db), "url": raw.get("gsheet_url"), "interval": raw.get("gsheet_sync_interval_seconds"),
+    return {"enabled": live_mode(db), "url": raw.get("gsheet_url"), "name": st.get("sheet_title"),
+            "interval": raw.get("gsheet_sync_interval_seconds"),
             "last_success": st.get("last_success"), "last_attempt": st.get("last_attempt"),
             "last_change": st.get("last_change"), "error": st.get("error")}
 
@@ -889,10 +890,13 @@ def gsheet_check(body: SheetCheckIn, user: AdminUser = Admin, db: Session = Depe
         if getattr(body, k) is not None:
             raw[k] = getattr(body, k)
     try:
-        content = G.fetch_xlsx(body.url)
+        content, title = G.fetch_xlsx(body.url)
     except Exception as e:
         raise HTTPException(502, str(e))
-    return G.inspect_workbook(db, content, to_config(raw))
+    out = G.inspect_workbook(db, content, to_config(raw))
+    if title:
+        out["title"] = title
+    return out
 
 
 @router.post("/settings/arena-link")

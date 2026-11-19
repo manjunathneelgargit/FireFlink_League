@@ -364,24 +364,34 @@ def overall_leaderboard(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLik
 
 
 # --------------------------------------------------------------------------------------- F2F challenge
-def f2f_challenge(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLike]) -> dict:
+def f2f_challenge(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLike],
+                   start: date | None = None, end: date | None = None) -> dict:
+    """League F2F challenge progress. Optional start/end scopes completed counts to a week."""
     achieved, per_bd, per_region = 0, defaultdict(int), defaultdict(int)
     sched_total, sched_regions, sched_bd = 0, defaultdict(int), defaultdict(int)
     completed_unqualified = 0
     f2f_outside_regions = 0
+
+    def in_range(d) -> bool:
+        if start and d.demo_date is not None and d.demo_date < start:
+            return False
+        if end and d.demo_date is not None and d.demo_date > end:
+            return False
+        return True
+
     for d in live(demos):
         if demo_kind(d, cfg) != "F2F":
             continue
         region = demo_region(d, cfg)
-        if counts_for_f2f(d, cfg):
+        if counts_for_f2f(d, cfg) and in_range(d):
             achieved += 1
             per_bd[d.bd_id] += 1
             per_region[region] += 1
-        elif counts_for_league(d, cfg) and region is None:
+        elif in_range(d) and counts_for_league(d, cfg) and region is None:
             f2f_outside_regions += 1
-        elif is_completed_unqualified(d, cfg) and in_league(d.demo_date, cfg) and region:
+        elif in_range(d) and is_completed_unqualified(d, cfg) and in_league(d.demo_date, cfg) and region:
             completed_unqualified += 1
-        if d.status == "Scheduled":
+        if d.status == "Scheduled" and in_range(d):
             sched_total += 1
             sched_bd[d.bd_id] += 1
             sched_regions[region or "Other"] += 1
@@ -458,7 +468,9 @@ def evaluate_revenue(r, cfg: LeagueConfig, rates: list) -> dict:
 
 
 def revenue_summary(cfg: LeagueConfig, bds: list[BDRef], revenues: list, rates: list,
-                    prize_amount: float = 100000) -> dict:
+                    prize_amount: float = 100000,
+                    start: date | None = None, end: date | None = None) -> dict:
+    """Confirmed league revenue. Optional start/end scopes by eligibility date (week view)."""
     per_bd = {b.id: {"bd_id": b.id, "bd_name": b.name, "total_inr": 0.0, "signed_inr": 0.0,
                      "credited_inr": 0.0, "records": 0, "pending_conversion": 0} for b in bds}
     by_country, by_domain, by_status, by_currency = (defaultdict(float) for _ in range(4))
@@ -474,6 +486,14 @@ def revenue_summary(cfg: LeagueConfig, bds: list[BDRef], revenues: list, rates: 
             row["pending_conversion"] += 1
         if not ev["eligible"]:
             continue
+        if start or end:
+            ed = date.fromisoformat(ev["eligibility_date"]) if ev.get("eligibility_date") else None
+            if ed is None:
+                continue
+            if start and ed < start:
+                continue
+            if end and ed > end:
+                continue
         v = ev["inr_value"]
         total += v
         row["total_inr"] += v
@@ -514,8 +534,44 @@ def revenue_summary(cfg: LeagueConfig, bds: list[BDRef], revenues: list, rates: 
 
 
 # --------------------------------------------------------------------------------------- awards
+def week_short_label(start: date, end: date) -> str:
+    """e.g. 'Week Nov 2 – Nov 7' for Arena dropdown."""
+    return f"Week {start.strftime('%b')} {start.day} – {end.strftime('%b')} {end.day}"
+
+
+def week_target_cards(daily: dict, start: date, end: date) -> list[dict]:
+    """Per-BD target cards for a week (Arena week view)."""
+    s, e = start.isoformat(), end.isoformat()
+    cards = []
+    for bd in daily.get("per_bd", {}).values():
+        days = [d for d in bd.get("days", []) if s <= d["date"] <= e]
+        if not days:
+            cards.append({"bd_id": bd["bd_id"], "bd_name": bd["bd_name"], "done": 0, "required": 0,
+                          "status": "Not Started", "days_achieved": 0, "days_assigned": 0})
+            continue
+        closed = [d for d in days if d.get("closed")]
+        done = sum(d["done"] for d in days)
+        required = sum(d["required"] for d in (closed or days))
+        days_achieved = sum(1 for d in closed if d["status"] == "Target Achieved")
+        if closed and days_achieved == len(closed):
+            status = "Target Achieved"
+        elif closed and all(d["status"] == "Target Missed" for d in closed):
+            status = "Target Missed"
+        elif any(not d.get("closed") for d in days):
+            open_day = next(d for d in days if not d.get("closed"))
+            status = open_day["status"]
+        else:
+            status = "Target Missed" if days_achieved < len(closed) else "In Progress"
+        cards.append({"bd_id": bd["bd_id"], "bd_name": bd["bd_name"], "done": done, "required": required,
+                      "status": status, "days_achieved": days_achieved, "days_assigned": len(closed)})
+    cards.sort(key=lambda c: c["bd_name"].lower())
+    return cards
+
+
 def weekly_results(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLike], finalized: dict,
-                   now: datetime | None = None) -> list[dict]:
+                   now: datetime | None = None, *, daily: dict | None = None,
+                   revenues: list | None = None, rates: list | None = None,
+                   prize_amount: float = 100000) -> list[dict]:
     today = now_local(cfg, now).date()
     out = []
     for w in league_weeks(cfg):
@@ -526,9 +582,21 @@ def weekly_results(cfg: LeagueConfig, bds: list[BDRef], demos: list[DemoLike], f
         state = "upcoming" if s > today else ("in_progress" if e >= today else "awaiting_finalization")
         if fin:
             state = "finalized"
-        out.append({**w, "state": state, "standings": board,
-                    "leaders": [{"bd_id": x["bd_id"], "bd_name": x["bd_name"], "total": x["total"]} for x in lead],
-                    "tie": len(lead) > 1, "finalized": fin})
+        worst = max((r["rank"] for r in board), default=None)
+        for r in board:
+            r["is_leader"] = r["rank"] == 1 and r["total"] > 0
+            r["is_lowest"] = worst is not None and r["rank"] == worst and worst > 1
+            r.setdefault("movement", 0)
+        row = {**w, "short_label": week_short_label(s, e), "state": state, "standings": board,
+               "leaders": [{"bd_id": x["bd_id"], "bd_name": x["bd_name"], "total": x["total"]} for x in lead],
+               "tie": len(lead) > 1, "finalized": fin,
+               "f2f": f2f_challenge(cfg, bds, demos, start=s, end=e)}
+        if daily is not None:
+            row["targets"] = week_target_cards(daily, s, e)
+        if revenues is not None:
+            rev = revenue_summary(cfg, bds, revenues, rates or [], prize_amount, start=s, end=e)
+            row["revenue"] = {k: v for k, v in rev.items() if k != "evaluated"}
+        out.append(row)
     return out
 
 

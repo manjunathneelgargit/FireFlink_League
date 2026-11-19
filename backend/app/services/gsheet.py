@@ -45,15 +45,44 @@ def sheet_id(url_or_id: str) -> str | None:
     return url_or_id.strip() if re.fullmatch(r"[A-Za-z0-9_-]{20,}", (url_or_id or "").strip()) else None
 
 
-def fetch_xlsx(url_or_id: str, timeout: int = 45) -> bytes:
+def _title_from_disposition(header: str | None) -> str | None:
+    """Parse the spreadsheet name from Content-Disposition (prefer UTF-8 filename*)."""
+    if not header:
+        return None
+    m = re.search(r"filename\*\s*=\s*UTF-8''([^;]+)", header, re.I)
+    if m:
+        from urllib.parse import unquote
+        name = unquote(m.group(1).strip().strip('"'))
+    else:
+        m = re.search(r'filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)', header, re.I)
+        if not m:
+            return None
+        name = (m.group(1) or m.group(2) or "").strip().strip('"')
+    if name.lower().endswith(".xlsx"):
+        name = name[:-5]
+    name = name.strip()
+    return name or None
+
+
+def _open_google(req: urllib.request.Request, timeout: int):
+    """Download without env HTTP(S)_PROXY — Cursor/sandbox proxies return Tunnel 403 to Google."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(req, timeout=timeout)
+
+
+def fetch_xlsx(url_or_id: str, timeout: int = 45) -> tuple[bytes, str | None]:
+    """Return (xlsx bytes, spreadsheet title or None)."""
     sid = sheet_id(url_or_id)
     if not sid:
         raise ValueError("Not a valid Google Sheets link")
-    req = urllib.request.Request(f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx",
-                                 headers={"User-Agent": "FireFlink-League-Tracker/1.0"})
+    req = urllib.request.Request(
+        f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx",
+        headers={"User-Agent": "FireFlink-League-Tracker/1.0"},
+    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_google(req, timeout) as resp:
             ctype = resp.headers.get("Content-Type", "")
+            title = _title_from_disposition(resp.headers.get("Content-Disposition"))
             data = resp.read()
     except urllib.error.HTTPError as e:
         if e.code in (401, 403, 404):
@@ -63,7 +92,7 @@ def fetch_xlsx(url_or_id: str, timeout: int = 45) -> bytes:
         raise ValueError(f"Could not reach Google Sheets: {e.reason}") from e
     if "spreadsheetml" not in ctype and not data.startswith(b"PK"):
         raise ValueError("Google did not return a spreadsheet - check the sheet's sharing settings")
-    return data
+    return data, title
 
 
 def _now_iso() -> str:
@@ -333,7 +362,9 @@ def run_once(db: Session, force: bool = False) -> dict:
         status = dict(raw.get(STATUS_KEY) or {})
         status["last_attempt"] = _now_iso()
         try:
-            content = fetch_xlsx(raw.get("gsheet_url") or "")
+            content, title = fetch_xlsx(raw.get("gsheet_url") or "")
+            if title:
+                status["sheet_title"] = title
             sha = hashlib.sha256(content).hexdigest()
             if sha == status.get("sha") and not force and not status.get("error"):
                 status["last_success"] = _now_iso()

@@ -239,7 +239,7 @@ def test_setup_wizard_backend(two_teams, monkeypatch):
 
     content = _basic_sheet([[1, "Zed", "Gulf Bank", "BFSI", "Dubai", "Product Demo", date(2026, 11, 2), "Completed"],
                             [2, "Yara", "KL Retail", "Retail", "Kuala Lumpur", "Product Demo", date(2026, 11, 3), "Completed"]])
-    monkeypatch.setattr(G, "fetch_xlsx", lambda url, timeout=45: content)
+    monkeypatch.setattr(G, "fetch_xlsx", lambda url, timeout=45: (content, "Test Sheet"))
     url = "https://docs.google.com/spreadsheets/d/16DbYr551dULe0g3tsFME4ezg3-L2LDhBFXIh9j5Kxzg/"
     chk = su.post("/api/gsheet/check", json={"url": url}, headers=T).json()
     assert chk["ok"] and chk["unknown_bds"] == ["Yara"] and chk["bd_names"] == ["Yara", "Zed"]

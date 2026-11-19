@@ -56,6 +56,14 @@ def api_not_found(path: str, request: Request):
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if DIST.exists():
     app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+    _LOGO = DIST / "fireflink-logo.svg"
+    _FAVICON = DIST / "favicon.svg"
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon_ico():
+        # Browsers request /favicon.ico by default; serve the brand mark (not the SPA HTML).
+        f = _FAVICON if _FAVICON.is_file() else _LOGO
+        return FileResponse(f, media_type="image/svg+xml")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):

@@ -1,6 +1,6 @@
 import { Crown, Lock, TrendingUp, Unlock } from 'lucide-react'
 import { api, errorText } from '../api'
-import { ActivityFeed, AwardsGrid, F2FChallenge, F2FMeetingsLeaderboard, Hero, KpiRow, Motivation, OverallLeaderboard, RevenueBoard, RevenueLeaderboardTable, TodayBoard } from '../components/board'
+import { ActivityFeed, AwardsGrid, F2FChallenge, F2FMeetingsLeaderboard, Hero, KpiRow, OverallLeaderboard, RevenueBoard, RevenueLeaderboardTable, TodayBoard } from '../components/board'
 import { useCelebrations } from '../components/celebrate'
 import { SyncBadge } from '../components/sync'
 import { Loading, useConfirm, useToast } from '../components/ui'
@@ -37,9 +37,6 @@ export default function Dashboard() {
       {layer}
       <Hero league={s.league} bdCount={s.kpis.bd_count} />
       <div style={{ marginTop: 14 }}><SyncBadge /></div>
-      <div className="card" style={{ marginTop: 14, padding: '12px 18px' }}>
-        <Motivation messages={s.league.motivational_messages} />
-      </div>
 
       <div className="section-label">League pulse</div>
       <KpiRow k={s.kpis} f2f={s.f2f} />

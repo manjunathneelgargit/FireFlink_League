@@ -46,6 +46,7 @@ export function SyncBadge({ compact }: { compact?: boolean }) {
     <div className={`row wrap ${compact ? '' : 'card tight'}`} style={{ gap: 10, padding: compact ? 0 : '8px 14px', borderColor: data.error ? 'rgba(255,92,108,.45)' : 'rgba(74,222,128,.35)' }}>
       <Sheet size={16} color={data.error ? 'var(--red)' : 'var(--green)'} />
       <span className="small" style={{ fontWeight: 700 }}>{data.error ? 'Google Sheet sync problem' : <><span className="live-dot" /> Live from Google Sheet</>}</span>
+      {data.name && <span className="pill" title={data.name} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.name}</span>}
       <span className="small muted">{data.last_success ? `synced ${timeAgo(data.last_success)}` : 'not synced yet'} · every {data.interval}s</span>
       {data.error && <span className="small red" title={data.error}><AlertTriangle size={13} style={{ verticalAlign: -2 }} /> {data.error}</span>}
       {(rejected > 0 || alerts > 0) && <span className="pill amber" title="See Reports & Settings → League settings → Google Sheet">{rejected ? `${rejected} sheet row(s) need fixing` : ''}{rejected && alerts ? ' · ' : ''}{alerts ? `${alerts} alert(s)` : ''}</span>}
@@ -106,7 +107,8 @@ export function SheetSettings({ s, set }: { s: any; set: (k: string, v: any) => 
       </div>
       {data && (
         <div className="col" style={{ gap: 8, marginTop: 14 }}>
-          <div className="small">Last successful sync: <b>{data.last_success ? new Date(data.last_success).toLocaleString() : '—'}</b>
+          <div className="small">Sheet: <b>{data.name || '—'}</b>
+            {data.last_success && <> · last successful sync: <b>{new Date(data.last_success).toLocaleString()}</b></>}
             {data.last_change && <> · last change from the sheet: <b>{new Date(data.last_change).toLocaleString()}</b></>}</div>
           {data.error && <div className="errors">{data.error}</div>}
           {(sum?.alerts ?? []).map((a: string) => <div key={a} className="notice amber">{a}</div>)}

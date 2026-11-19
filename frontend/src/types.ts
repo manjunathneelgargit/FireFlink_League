@@ -51,11 +51,20 @@ export interface RevenueSummary {
 
 export interface Finalized { id: number; result: any; notes: string | null; finalized_at: string; finalized_by: string }
 
+export interface WeekTargetCard {
+  bd_id: number; bd_name: string; done: number; required: number; status: string
+  days_achieved: number; days_assigned: number
+}
+
 export interface Week {
   week_no: number; key: string; start: string; end: string; announce_on: string; label: string
+  short_label?: string
   state: 'upcoming' | 'in_progress' | 'awaiting_finalization' | 'finalized'
-  standings: { bd_id: number; bd_name: string; total: number; f2f: number; virtual: number; rank: number }[]
+  standings: (Pick<OverallRow, 'bd_id' | 'bd_name' | 'total' | 'f2f' | 'virtual' | 'rank'> & {
+    is_leader?: boolean; is_lowest?: boolean; movement?: number
+  })[]
   leaders: { bd_id: number; bd_name: string; total: number }[]; tie: boolean; finalized: Finalized | null
+  f2f?: F2F; revenue?: RevenueSummary; targets?: WeekTargetCard[]
 }
 
 export interface Leader { bd_id: number; bd_name: string; total?: number; f2f?: number }
@@ -98,7 +107,8 @@ export interface Snapshot {
 }
 
 export interface SyncInfo {
-  enabled: boolean; url?: string; interval?: number; last_success: string | null; last_attempt?: string | null
+  enabled: boolean; url?: string; name?: string | null; interval?: number
+  last_success: string | null; last_attempt?: string | null
   last_change?: string | null; error: string | null
 }
 
